@@ -88,7 +88,8 @@ impl Pty {
 
     if let Ok(mut termios) = termios::tcgetattr(&pty_pair.controller) {
       termios.input_modes.set(InputModes::IUTF8, true);
-      let _ = termios::tcsetattr(&pty_pair.controller, OptionalActions::Now, &termios);
+      termios::tcsetattr(&pty_pair.controller, OptionalActions::Now, &termios)
+        .map_err(|err| NAPI_ERROR::new(napi::Status::GenericFailure, err))?;
     }
 
     cmd.stdin(unsafe { Stdio::from_raw_fd(fd_user) });
