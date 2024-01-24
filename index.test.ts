@@ -90,7 +90,7 @@ describe("PTY", () => {
       "/bin/pwd",
       [],
       {},
-      "/bin",
+      CWD,
       [80, 24],
       (err, exitCode) => {
         expect(err).toBeNull();
@@ -102,7 +102,7 @@ describe("PTY", () => {
     const readStream = fs.createReadStream("", { fd: pty.fd });
 
     readStream.on("data", (chunk) => {
-      expect(chunk.toString()).toBe("/bin\r\n");
+      expect(chunk.toString()).toBe(`${CWD}\r\n`);
     });
   });
 
