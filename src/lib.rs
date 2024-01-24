@@ -35,11 +35,11 @@ fn set_controlling_terminal(fd: c_int) -> Result<(), Error> {
     libc::ioctl(fd, TIOCSCTTY as _, 0)
   };
 
-  if res == 0 {
-    Ok(())
-  } else {
-    Err(Error::last_os_error())
+  if res != 0 {
+    return Err(Error::last_os_error());
   }
+
+  Ok(())
 }
 
 #[allow(dead_code)]
@@ -48,14 +48,14 @@ unsafe fn set_nonblocking(fd: c_int) -> Result<(), NAPI_ERROR> {
 
   let res = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
 
-  if res == 0 {
-    Ok(())
-  } else {
-    Err(NAPI_ERROR::new(
+  if res != 0 {
+    return Err(NAPI_ERROR::new(
       napi::Status::GenericFailure,
       format!("fcntl F_SETFL failed: {}", Error::last_os_error()),
-    ))
+    ));
   }
+
+  Ok(())
 }
 
 #[napi]
@@ -192,13 +192,13 @@ impl Pty {
 
     let res = unsafe { libc::ioctl(self.fd, libc::TIOCSWINSZ, &window_size as *const _) };
 
-    if res == 0 {
-      Ok(())
-    } else {
-      Err(NAPI_ERROR::new(
+    if res != 0 {
+      return Err(NAPI_ERROR::new(
         napi::Status::GenericFailure,
         format!("ioctl TIOCSWINSZ failed: {}", Error::last_os_error()),
-      ))
+      ));
     }
+
+    Ok(())
   }
 }
