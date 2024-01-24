@@ -130,12 +130,9 @@ impl Pty {
       .create_threadsafe_function(0, |ctx| ctx.env.create_int32(ctx.value).map(|v| vec![v]))
       .unwrap();
 
-    let mut child = match cmd.spawn() {
-      Ok(child) => child,
-      Err(err) => {
-        return Err(NAPI_ERROR::new(GenericFailure, err));
-      }
-    };
+    let mut child = cmd
+      .spawn()
+      .map_err(|err| NAPI_ERROR::new(GenericFailure, err))?;
 
     let pid = child.id();
 
@@ -165,10 +162,7 @@ impl Pty {
     });
 
     unsafe {
-      match set_nonblocking(fd_controller) {
-        Ok(_) => {}
-        Err(err) => return Err(err),
-      };
+      set_nonblocking(fd_controller)?;
     }
 
     let file = File::from(pty_pair.controller);
