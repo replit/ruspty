@@ -38,7 +38,7 @@ jobs:
               npm install -g bun &&
               bun run build --target x86_64-unknown-linux-gnu &&
               strip *.node
-    name: stable - ${{ matrix.settings.target }} - node@18
+    name: stable - ${{ matrix.settings.target }} - node@20
     runs-on: ${{ matrix.settings.host }}
     steps:
       - uses: actions/checkout@v4
@@ -47,7 +47,7 @@ jobs:
         uses: actions/setup-node@v4
         if: ${{ !matrix.settings.docker }}
         with:
-          node-version: 18
+          node-version: 20
       - name: Install
         uses: dtolnay/rust-toolchain@stable
         if: ${{ !matrix.settings.docker }}
@@ -102,7 +102,6 @@ jobs:
           - host: macos-latest
             target: x86_64-apple-darwin
         node:
-          - '18'
           - '20'
     runs-on: ${{ matrix.settings.host }}
     steps:
@@ -132,7 +131,6 @@ jobs:
       fail-fast: false
       matrix:
         node:
-          - '18'
           - '20'
     runs-on: ubuntu-latest
     steps:
@@ -153,7 +151,7 @@ jobs:
         run: ls -R .
         shell: bash
       - name: Test bindings
-        run: docker run --rm -v $(pwd):/build -w /build node:${{ matrix.node }}-slim bun test
+        run: docker run --rm -v $(pwd):/build -w /build oven/bun:1 bun test
   publish:
     name: Publish
     runs-on: ubuntu-latest
@@ -166,7 +164,7 @@ jobs:
       - name: Setup node
         uses: actions/setup-node@v4
         with:
-          node-version: 18
+          node-version: 20
       - name: Install dependencies
         run: bun install
       - name: Download all artifacts
