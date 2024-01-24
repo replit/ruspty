@@ -31,7 +31,7 @@
     "release": "npm publish --access public"
   },
   "optionalDependencies": {
-    "@replit/ruspty-darwin-x64": "1.0.0-alpha.0",
-    "@replit/ruspty-linux-x64-gnu": "1.0.0-alpha.0"
+    "@replit/ruspty-darwin-x64": "1.0.0-alpha.1",
+    "@replit/ruspty-linux-x64-gnu": "1.0.0-alpha.1"
   }
 }
