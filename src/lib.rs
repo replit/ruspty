@@ -80,10 +80,8 @@ impl Pty {
     let mut cmd = Command::new(command);
     cmd.args(args);
 
-    let pty_pair = match openpty(None, Some(&window_size)) {
-      Ok(pty_pair) => pty_pair,
-      Err(err) => return Err(NAPI_ERROR::new(napi::Status::GenericFailure, err)),
-    };
+    let pty_pair = openpty(None, Some(&window_size))
+      .map_err(|err| NAPI_ERROR::new(napi::Status::GenericFailure, err))?;
 
     let fd_controller = pty_pair.controller.as_raw_fd();
     let fd_user = pty_pair.user.as_raw_fd();
@@ -107,10 +105,7 @@ impl Pty {
           return Err(Error::new(ErrorKind::Other, "Failed to set session id"));
         }
 
-        match set_controlling_terminal(fd_user) {
-          Ok(_) => {}
-          Err(err) => return Err(err),
-        };
+        set_controlling_terminal(fd_user)?;
 
         libc::close(fd_user);
         libc::close(fd_controller);
