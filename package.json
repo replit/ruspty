@@ -27,7 +27,8 @@
     "prepublishOnly": "napi prepublish -t npm",
     "test": "bun test",
     "universal": "napi universal",
-    "version": "napi version"
+    "version": "napi version",
+    "release": "npm publish --access public"
   },
   "optionalDependencies": {
     "@replit/ruspty-darwin-x64": "1.0.0-alpha.0",
