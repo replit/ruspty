@@ -1,6 +1,6 @@
 {
   "name": "@replit/ruspty",
-  "version": "1.0.0",
+  "version": "1.0.0-alpha.0",
   "main": "index.js",
   "types": "index.d.ts",
   "author": "Szymon Kaliski <hi@szymonkaliski.com>",
@@ -28,5 +28,9 @@
     "test": "bun test",
     "universal": "napi universal",
     "version": "napi version"
+  },
+  "optionalDependencies": {
+    "@replit/ruspty-darwin-x64": "1.0.0-alpha.0",
+    "@replit/ruspty-linux-x64-gnu": "1.0.0-alpha.0"
   }
 }
