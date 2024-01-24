@@ -17,7 +17,7 @@ describe("PTY", () => {
         expect(err).toBeNull();
         expect(exitCode).toBe(0);
         done();
-      }
+      },
     );
 
     const readStream = fs.createReadStream("", { fd: pty.fd });
@@ -38,7 +38,7 @@ describe("PTY", () => {
         expect(err).toBeNull();
         expect(exitCode).toBe(17);
         done();
-      }
+      },
     );
   });
 
@@ -85,19 +85,12 @@ describe("PTY", () => {
     writeStream.write("stty size; echo 'done1'\n");
   });
 
-  test.skip("respects working directory", (done) => {
-    const pty = new Pty(
-      "/bin/pwd",
-      [],
-      {},
-      CWD,
-      [80, 24],
-      (err, exitCode) => {
-        expect(err).toBeNull();
-        expect(exitCode).toBe(0);
-        done();
-      }
-    );
+  test("respects working directory", (done) => {
+    const pty = new Pty("/bin/pwd", [], {}, CWD, [80, 24], (err, exitCode) => {
+      expect(err).toBeNull();
+      expect(exitCode).toBe(0);
+      done();
+    });
 
     const readStream = fs.createReadStream("", { fd: pty.fd });
 
@@ -112,7 +105,7 @@ describe("PTY", () => {
 
     const pty = new Pty(
       "/bin/sh",
-      ["-c", "echo $ENV_VARIABLE; exit"],
+      ["-c", "sleep 0.1s && echo $ENV_VARIABLE; exit"],
       {
         ENV_VARIABLE: message,
       },
@@ -122,8 +115,9 @@ describe("PTY", () => {
         expect(err).toBeNull();
         expect(exitCode).toBe(0);
         expect(buffer).toBe(message + "\r\n");
+
         done();
-      }
+      },
     );
 
     const readStream = fs.createReadStream("", { fd: pty.fd });
