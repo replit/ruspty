@@ -1,6 +1,6 @@
 {
   "name": "@replit/ruspty-linux-x64-gnu",
-  "version": "1.0.0-alpha.1",
+  "version": "1.0.0-alpha.2",
   "os": [
     "linux"
   ],
