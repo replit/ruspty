@@ -80,17 +80,17 @@ impl Pty {
     let mut cmd = Command::new(command);
     cmd.args(args);
 
-    let ends = match openpty(None, Some(&window_size)) {
-      Ok(ends) => ends,
+    let pty_pair = match openpty(None, Some(&window_size)) {
+      Ok(pty_pair) => pty_pair,
       Err(err) => return Err(NAPI_ERROR::new(napi::Status::GenericFailure, err)),
     };
 
-    let fd_controller = ends.controller.as_raw_fd();
-    let fd_user = ends.user.as_raw_fd();
+    let fd_controller = pty_pair.controller.as_raw_fd();
+    let fd_user = pty_pair.user.as_raw_fd();
 
-    if let Ok(mut termios) = termios::tcgetattr(&ends.controller) {
+    if let Ok(mut termios) = termios::tcgetattr(&pty_pair.controller) {
       termios.input_modes.set(InputModes::IUTF8, true);
-      let _ = termios::tcsetattr(&ends.controller, OptionalActions::Now, &termios);
+      let _ = termios::tcsetattr(&pty_pair.controller, OptionalActions::Now, &termios);
     }
 
     cmd.stdin(unsafe { Stdio::from_raw_fd(fd_user) });
@@ -171,7 +171,7 @@ impl Pty {
       };
     }
 
-    let file = File::from(ends.controller);
+    let file = File::from(pty_pair.controller);
     let fd = file.as_raw_fd();
 
     Ok(Pty { file, fd, pid })
