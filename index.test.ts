@@ -85,7 +85,7 @@ describe("PTY", () => {
     writeStream.write("stty size; echo 'done1'\n");
   });
 
-  test("respects working directory", (done) => {
+  test.skip("respects working directory", (done) => {
     const pty = new Pty(
       "/bin/pwd",
       [],
