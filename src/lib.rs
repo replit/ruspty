@@ -131,6 +131,19 @@ impl Pty {
 
     let pid = child.id();
 
+    // We're creating a new thread for every child, this uses a bit more system resources compared
+    // to alternatives (below), trading off simplicity of implementation.
+    //
+    // The altneratives:
+    // - Mandate that every single `wait` goes through a central process-wide loop that knows
+    //   about all processes (this is what `pid1` does), but needs a bit of care and some static
+    //   analysis to ensure that every single call goes through the wrapper to avoid double `wait`'s
+    //   on a child.
+    // - Have a single thread loop where other entities can register children (by sending the pid
+    //   over a channel) and this loop can use `epoll` to listen for each child's `pidfd` for when
+    //   they are ready to be `wait`'ed. This has the inconvenience that it consumes one FD per child.
+    //
+    // For discussion check out: https://github.com/replit/ruspty/pull/1#discussion_r1463672548
     thread::spawn(move || match child.wait() {
       Ok(status) => {
         if status.success() {
