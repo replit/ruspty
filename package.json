@@ -18,7 +18,8 @@
   "devDependencies": {
     "@napi-rs/cli": "^2.17.0",
     "@types/node": "^20.4.1",
-    "@types/jest": "^29.5.11"
+    "@types/jest": "^29.5.11",
+    "prettier": "^3.2.4"
   },
   "scripts": {
     "artifacts": "napi artifacts",
@@ -28,7 +29,8 @@
     "test": "bun test",
     "universal": "napi universal",
     "version": "napi version",
-    "release": "npm publish --access public"
+    "release": "npm publish --access public",
+    "format": "npx prettier *.ts --write"
   },
   "optionalDependencies": {
     "@replit/ruspty-darwin-x64": "1.0.0-alpha.1",

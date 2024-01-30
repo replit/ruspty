@@ -1,14 +1,14 @@
-import fs from "fs";
-import { Pty } from "./index";
+import fs from 'fs';
+import { Pty } from './index';
 
-describe("PTY", () => {
+describe('PTY', () => {
   const CWD = process.cwd();
 
-  test("spawns and exits", (done) => {
-    const message = "hello from a pty";
+  test('spawns and exits', (done) => {
+    const message = 'hello from a pty';
 
     const pty = new Pty(
-      "/bin/echo",
+      '/bin/echo',
       [message],
       {},
       CWD,
@@ -20,17 +20,17 @@ describe("PTY", () => {
       },
     );
 
-    const readStream = fs.createReadStream("", { fd: pty.fd });
+    const readStream = fs.createReadStream('', { fd: pty.fd });
 
-    readStream.on("data", (chunk) => {
-      expect(chunk.toString()).toBe(message + "\r\n");
+    readStream.on('data', (chunk) => {
+      expect(chunk.toString()).toBe(message + '\r\n');
     });
   });
 
-  test("captures an exit code", (done) => {
+  test('captures an exit code', (done) => {
     new Pty(
-      "/bin/sh",
-      ["-c", "exit 17"],
+      '/bin/sh',
+      ['-c', 'exit 17'],
       {},
       CWD,
       [80, 24],
@@ -42,15 +42,15 @@ describe("PTY", () => {
     );
   });
 
-  test("can be written to", (done) => {
-    const message = "hello cat";
+  test('can be written to', (done) => {
+    const message = 'hello cat';
 
-    const pty = new Pty("/bin/cat", [], {}, CWD, [80, 24], () => {});
+    const pty = new Pty('/bin/cat', [], {}, CWD, [80, 24], () => {});
 
-    const readStream = fs.createReadStream("", { fd: pty.fd });
-    const writeStream = fs.createWriteStream("", { fd: pty.fd });
+    const readStream = fs.createReadStream('', { fd: pty.fd });
+    const writeStream = fs.createWriteStream('', { fd: pty.fd });
 
-    readStream.on("data", (chunk) => {
+    readStream.on('data', (chunk) => {
       expect(chunk.toString()).toBe(message);
       done();
     });
@@ -58,26 +58,26 @@ describe("PTY", () => {
     writeStream.write(message);
   });
 
-  test("can be resized", (done) => {
-    const pty = new Pty("/bin/sh", [], {}, CWD, [80, 24], () => {});
+  test('can be resized', (done) => {
+    const pty = new Pty('/bin/sh', [], {}, CWD, [80, 24], () => {});
 
-    const readStream = fs.createReadStream("", { fd: pty.fd });
-    const writeStream = fs.createWriteStream("", { fd: pty.fd });
+    const readStream = fs.createReadStream('', { fd: pty.fd });
+    const writeStream = fs.createWriteStream('', { fd: pty.fd });
 
-    let buffer = "";
+    let buffer = '';
 
-    readStream.on("data", (chunk) => {
+    readStream.on('data', (chunk) => {
       buffer += chunk.toString();
 
-      if (buffer.includes("done1\r\n")) {
-        expect(buffer).toContain("24 80");
+      if (buffer.includes('done1\r\n')) {
+        expect(buffer).toContain('24 80');
         pty.resize([100, 60]);
-        buffer = "";
+        buffer = '';
         writeStream.write("stty size; echo 'done2'\n");
       }
 
-      if (buffer.includes("done2\r\n")) {
-        expect(buffer).toContain("60 100");
+      if (buffer.includes('done2\r\n')) {
+        expect(buffer).toContain('60 100');
         done();
       }
     });
@@ -85,27 +85,27 @@ describe("PTY", () => {
     writeStream.write("stty size; echo 'done1'\n");
   });
 
-  test("respects working directory", (done) => {
-    const pty = new Pty("/bin/pwd", [], {}, CWD, [80, 24], (err, exitCode) => {
+  test('respects working directory', (done) => {
+    const pty = new Pty('/bin/pwd', [], {}, CWD, [80, 24], (err, exitCode) => {
       expect(err).toBeNull();
       expect(exitCode).toBe(0);
       done();
     });
 
-    const readStream = fs.createReadStream("", { fd: pty.fd });
+    const readStream = fs.createReadStream('', { fd: pty.fd });
 
-    readStream.on("data", (chunk) => {
+    readStream.on('data', (chunk) => {
       expect(chunk.toString()).toBe(`${CWD}\r\n`);
     });
   });
 
-  test.skip("respects env", (done) => {
-    const message = "hello from env";
-    let buffer = "";
+  test.skip('respects env', (done) => {
+    const message = 'hello from env';
+    let buffer = '';
 
     const pty = new Pty(
-      "/bin/sh",
-      ["-c", "sleep 0.1s && echo $ENV_VARIABLE && exit"],
+      '/bin/sh',
+      ['-c', 'sleep 0.1s && echo $ENV_VARIABLE && exit'],
       {
         ENV_VARIABLE: message,
       },
@@ -114,23 +114,23 @@ describe("PTY", () => {
       (err, exitCode) => {
         expect(err).toBeNull();
         expect(exitCode).toBe(0);
-        expect(buffer).toBe(message + "\r\n");
+        expect(buffer).toBe(message + '\r\n');
 
         done();
       },
     );
 
-    const readStream = fs.createReadStream("", { fd: pty.fd });
+    const readStream = fs.createReadStream('', { fd: pty.fd });
 
-    readStream.on("data", (chunk) => {
+    readStream.on('data', (chunk) => {
       buffer += chunk.toString();
     });
   });
 
-  test("works with Bun.read & Bun.write", (done) => {
-    const message = "hello bun";
+  test('works with Bun.read & Bun.write', (done) => {
+    const message = 'hello bun';
 
-    const pty = new Pty("/bin/cat", [], {}, CWD, [80, 24], () => {});
+    const pty = new Pty('/bin/cat', [], {}, CWD, [80, 24], () => {});
 
     const file = Bun.file(pty.fd);
 
@@ -146,5 +146,15 @@ describe("PTY", () => {
     read();
 
     Bun.write(pty.fd, message);
+  });
+
+  test("doesn't break when executing non-existing binary", (done) => {
+    try {
+      new Pty('/bin/this-does-not-exist', [], {}, CWD, [80, 24], () => {});
+    } catch (e) {
+      expect(e.message).toContain('No such file or directory');
+
+      done();
+    }
   });
 });
