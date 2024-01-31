@@ -18,7 +18,7 @@ The Rust PTY implementation is cargo-culted from [Alacritty's Unix TTY code](htt
 Following ["Publish It" section from `napi-rs` docs](https://napi.rs/docs/introduction/simple-package#publish-it):
 
 - `npm version [major|minor|patch]`
-- `git push --follow tags`
+- `git push --follow-tags`
 
 Github Action should take care of publishing after that.
 
