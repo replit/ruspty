@@ -46,7 +46,16 @@ fn set_controlling_terminal(fd: c_int) -> Result<(), Error> {
 fn set_nonblocking(fd: c_int) -> Result<(), NAPI_ERROR> {
   use libc::{fcntl, F_GETFL, F_SETFL, O_NONBLOCK};
 
-  let res = unsafe { fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK) };
+  let status_flags = unsafe { fcntl(fd, F_GETFL, 0) };
+
+  if status_flags < 0 {
+    return Err(NAPI_ERROR::new(
+      napi::Status::GenericFailure,
+      format!("fcntl F_GETFL failed: {}", Error::last_os_error()),
+    ));
+  }
+
+  let res = unsafe { fcntl(fd, F_SETFL, status_flags | O_NONBLOCK) };
 
   if res != 0 {
     return Err(NAPI_ERROR::new(
