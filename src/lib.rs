@@ -43,10 +43,10 @@ fn set_controlling_terminal(fd: c_int) -> Result<(), Error> {
 }
 
 #[allow(dead_code)]
-unsafe fn set_nonblocking(fd: c_int) -> Result<(), NAPI_ERROR> {
+fn set_nonblocking(fd: c_int) -> Result<(), NAPI_ERROR> {
   use libc::{fcntl, F_GETFL, F_SETFL, O_NONBLOCK};
 
-  let res = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
+  let res = unsafe { fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK) };
 
   if res != 0 {
     return Err(NAPI_ERROR::new(
@@ -131,9 +131,7 @@ impl Pty {
 
     let pid = child.id();
 
-    unsafe {
-      set_nonblocking(fd_controller)?;
-    }
+    set_nonblocking(fd_controller)?;
 
     let file = File::from(pty_pair.controller);
     let fd = file.as_raw_fd();
