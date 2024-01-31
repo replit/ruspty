@@ -1,0 +1,17 @@
+run = "bun run build:debug && bun test"
+modules = ["bun-1.0:v17-20240117-0bd73cd", "nodejs-20:v24-20240117-0bd73cd", "rust-stable:v4-20240117-0bd73cd"]
+
+disableGuessImports = true
+disableInstallBeforeRun = true
+
+[nix]
+channel = "stable-23_11"
+
+[rules]
+
+[rules.formatter]
+
+[rules.formatter.fileExtensions]
+
+[rules.formatter.fileExtensions.".ts"]
+id = "module:nodejs-20:v24-20240117-0bd73cd/formatter:prettier"
