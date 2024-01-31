@@ -28,6 +28,12 @@ struct Pty {
   pub pid: u32,
 }
 
+#[napi(object)]
+struct Size {
+  pub cols: u16,
+  pub rows: u16,
+}
+
 #[allow(dead_code)]
 fn set_controlling_terminal(fd: c_int) -> Result<(), Error> {
   let res = unsafe {
@@ -76,12 +82,12 @@ impl Pty {
     args: Vec<String>,
     envs: HashMap<String, String>,
     dir: String,
-    #[napi(ts_arg_type = "[cols: number, rows: number]")] size: (u16, u16),
+    size: Size,
     #[napi(ts_arg_type = "(err: null | Error, exitCode: number) => void")] on_exit: JsFunction,
   ) -> Result<Self, NAPI_ERROR> {
     let window_size = Winsize {
-      ws_col: size.0,
-      ws_row: size.1,
+      ws_col: size.cols,
+      ws_row: size.rows,
       ws_xpixel: 0,
       ws_ypixel: 0,
     };
@@ -195,13 +201,10 @@ impl Pty {
 
   #[napi]
   #[allow(dead_code)]
-  pub fn resize(
-    &mut self,
-    #[napi(ts_arg_type = "[cols: number, rows: number]")] size: (u16, u16),
-  ) -> Result<(), NAPI_ERROR> {
+  pub fn resize(&mut self, size: Size) -> Result<(), NAPI_ERROR> {
     let window_size = Winsize {
-      ws_col: size.0,
-      ws_row: size.1,
+      ws_col: size.cols,
+      ws_row: size.rows,
       ws_xpixel: 0,
       ws_ypixel: 0,
     };

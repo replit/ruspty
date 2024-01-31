@@ -12,7 +12,7 @@ describe('PTY', () => {
       [message],
       {},
       CWD,
-      [80, 24],
+      { rows: 24, cols: 80 },
       (err, exitCode) => {
         expect(err).toBeNull();
         expect(exitCode).toBe(0);
@@ -33,7 +33,7 @@ describe('PTY', () => {
       ['-c', 'exit 17'],
       {},
       CWD,
-      [80, 24],
+      { rows: 24, cols: 80 },
       (err, exitCode) => {
         expect(err).toBeNull();
         expect(exitCode).toBe(17);
@@ -45,7 +45,14 @@ describe('PTY', () => {
   test('can be written to', (done) => {
     const message = 'hello cat';
 
-    const pty = new Pty('/bin/cat', [], {}, CWD, [80, 24], () => {});
+    const pty = new Pty(
+      '/bin/cat',
+      [],
+      {},
+      CWD,
+      { rows: 24, cols: 80 },
+      () => {},
+    );
 
     const readStream = fs.createReadStream('', { fd: pty.fd });
     const writeStream = fs.createWriteStream('', { fd: pty.fd });
@@ -59,7 +66,14 @@ describe('PTY', () => {
   });
 
   test('can be resized', (done) => {
-    const pty = new Pty('/bin/sh', [], {}, CWD, [80, 24], () => {});
+    const pty = new Pty(
+      '/bin/sh',
+      [],
+      {},
+      CWD,
+      { rows: 24, cols: 80 },
+      () => {},
+    );
 
     const readStream = fs.createReadStream('', { fd: pty.fd });
     const writeStream = fs.createWriteStream('', { fd: pty.fd });
@@ -71,7 +85,7 @@ describe('PTY', () => {
 
       if (buffer.includes('done1\r\n')) {
         expect(buffer).toContain('24 80');
-        pty.resize([100, 60]);
+        pty.resize({ rows: 60, cols: 100 });
         buffer = '';
         writeStream.write("stty size; echo 'done2'\n");
       }
@@ -86,11 +100,18 @@ describe('PTY', () => {
   });
 
   test('respects working directory', (done) => {
-    const pty = new Pty('/bin/pwd', [], {}, CWD, [80, 24], (err, exitCode) => {
-      expect(err).toBeNull();
-      expect(exitCode).toBe(0);
-      done();
-    });
+    const pty = new Pty(
+      '/bin/pwd',
+      [],
+      {},
+      CWD,
+      { rows: 24, cols: 80 },
+      (err, exitCode) => {
+        expect(err).toBeNull();
+        expect(exitCode).toBe(0);
+        done();
+      },
+    );
 
     const readStream = fs.createReadStream('', { fd: pty.fd });
 
@@ -110,7 +131,7 @@ describe('PTY', () => {
         ENV_VARIABLE: message,
       },
       CWD,
-      [80, 24],
+      { rows: 24, cols: 80 },
       (err, exitCode) => {
         expect(err).toBeNull();
         expect(exitCode).toBe(0);
@@ -130,7 +151,14 @@ describe('PTY', () => {
   test('works with Bun.read & Bun.write', (done) => {
     const message = 'hello bun';
 
-    const pty = new Pty('/bin/cat', [], {}, CWD, [80, 24], () => {});
+    const pty = new Pty(
+      '/bin/cat',
+      [],
+      {},
+      CWD,
+      { rows: 24, cols: 80 },
+      () => {},
+    );
 
     const file = Bun.file(pty.fd);
 
@@ -150,7 +178,14 @@ describe('PTY', () => {
 
   test("doesn't break when executing non-existing binary", (done) => {
     try {
-      new Pty('/bin/this-does-not-exist', [], {}, CWD, [80, 24], () => {});
+      new Pty(
+        '/bin/this-does-not-exist',
+        [],
+        {},
+        CWD,
+        { rows: 24, cols: 80 },
+        () => {},
+      );
     } catch (e) {
       expect(e.message).toContain('No such file or directory');
 
