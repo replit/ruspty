@@ -131,10 +131,17 @@ impl Pty {
 
     let pid = child.id();
 
+    unsafe {
+      set_nonblocking(fd_controller)?;
+    }
+
+    let file = File::from(pty_pair.controller);
+    let fd = file.as_raw_fd();
+
     // We're creating a new thread for every child, this uses a bit more system resources compared
     // to alternatives (below), trading off simplicity of implementation.
     //
-    // The altneratives:
+    // The alternatives:
     // - Mandate that every single `wait` goes through a central process-wide loop that knows
     //   about all processes (this is what `pid1` does), but needs a bit of care and some static
     //   analysis to ensure that every single call goes through the wrapper to avoid double `wait`'s
@@ -144,37 +151,37 @@ impl Pty {
     //   they are ready to be `wait`'ed. This has the inconvenience that it consumes one FD per child.
     //
     // For discussion check out: https://github.com/replit/ruspty/pull/1#discussion_r1463672548
-    thread::spawn(move || match child.wait() {
-      Ok(status) => {
-        if status.success() {
-          ts_on_exit.call(Ok(0), ThreadsafeFunctionCallMode::Blocking);
-        } else {
+    thread::spawn(move || {
+      match child.wait() {
+        Ok(status) => {
+          if status.success() {
+            ts_on_exit.call(Ok(0), ThreadsafeFunctionCallMode::Blocking);
+          } else {
+            ts_on_exit.call(
+              Ok(status.code().unwrap_or(-1)),
+              ThreadsafeFunctionCallMode::Blocking,
+            );
+          }
+        }
+        Err(err) => {
           ts_on_exit.call(
-            Ok(status.code().unwrap_or(-1)),
+            Err(NAPI_ERROR::new(
+              GenericFailure,
+              format!(
+                "OS error when waiting for child process to exit: {}",
+                err.raw_os_error().unwrap_or(-1)
+              ),
+            )),
             ThreadsafeFunctionCallMode::Blocking,
           );
         }
       }
-      Err(err) => {
-        ts_on_exit.call(
-          Err(NAPI_ERROR::new(
-            GenericFailure,
-            format!(
-              "OS error when waiting for child process to exit: {}",
-              err.raw_os_error().unwrap_or(-1)
-            ),
-          )),
-          ThreadsafeFunctionCallMode::Blocking,
-        );
+
+      // Close the fd once we return from `child.wait()`.
+      unsafe {
+        rustix::io::close(fd);
       }
     });
-
-    unsafe {
-      set_nonblocking(fd_controller)?;
-    }
-
-    let file = File::from(pty_pair.controller);
-    let fd = file.as_raw_fd();
 
     Ok(Pty { file, fd, pid })
   }
