@@ -4,6 +4,14 @@
   "main": "index.js",
   "types": "index.d.ts",
   "author": "Szymon Kaliski <hi@szymonkaliski.com>",
+  "repository": { 
+    "type": "git", 
+    "url": "https://github.com/replit/rustpy.git" 
+  },
+  "homepage": "https://github.com/replit/ruspty#readme",
+  "bugs": {
+    "url": "https://github.com/replit/ruspty/issues"
+  },
   "napi": {
     "name": "ruspty",
     "triples": {
