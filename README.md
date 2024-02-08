@@ -3,7 +3,7 @@
 Running:
 
 - `bun install`
-- `bun run build`
+- `bun run build` / `bun run build:debug`
 - `bun test`
 
 The code mainly targets Bun, but does work in Node too.
