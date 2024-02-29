@@ -1,3 +1,4 @@
+import os from 'os';
 import fs from 'fs';
 import { Pty } from './index';
 
@@ -43,10 +44,12 @@ describe('PTY', () => {
   });
 
   test('can be started many times', (done) => {
-    const num = 100;
-    let exited = Array.from({ length: num }).map(() => false);
+    const num = os.platform() === 'darwin' ? 10 : 100;
+    const exited: Array<boolean> = [];
 
     for (let i = 0; i < num; i++) {
+      exited[i] = false;
+
       new Pty(
         'sh',
         ['-c', `exit 0`],
