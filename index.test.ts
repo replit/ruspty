@@ -8,7 +8,7 @@ describe('PTY', () => {
     const message = 'hello from a pty';
 
     const pty = new Pty(
-      '/bin/echo',
+      'echo',
       [message],
       {},
       CWD,
@@ -29,7 +29,7 @@ describe('PTY', () => {
 
   test('captures an exit code', (done) => {
     new Pty(
-      '/bin/sh',
+      'sh',
       ['-c', 'exit 17'],
       {},
       CWD,
@@ -42,17 +42,34 @@ describe('PTY', () => {
     );
   });
 
+  test('can be started many times', (done) => {
+    const num = 100;
+    let exited = Array.from({ length: num }).map(() => false);
+
+    for (let i = 0; i < num; i++) {
+      new Pty(
+        'sh',
+        ['-c', `exit 0`],
+        {},
+        CWD,
+        { rows: 24, cols: 80 },
+        (err, exitCode) => {
+          exited[i] = true;
+          expect(err).toBeNull();
+          expect(exitCode).toBe(0);
+
+          if (!exited.some((x) => x === false)) {
+            done();
+          }
+        },
+      );
+    }
+  });
+
   test('can be written to', (done) => {
     const message = 'hello cat';
 
-    const pty = new Pty(
-      '/bin/cat',
-      [],
-      {},
-      CWD,
-      { rows: 24, cols: 80 },
-      () => {},
-    );
+    const pty = new Pty('cat', [], {}, CWD, { rows: 24, cols: 80 }, () => {});
 
     const readStream = fs.createReadStream('', { fd: pty.fd });
     const writeStream = fs.createWriteStream('', { fd: pty.fd });
@@ -66,14 +83,7 @@ describe('PTY', () => {
   });
 
   test('can be resized', (done) => {
-    const pty = new Pty(
-      '/bin/sh',
-      [],
-      {},
-      CWD,
-      { rows: 24, cols: 80 },
-      () => {},
-    );
+    const pty = new Pty('sh', [], {}, CWD, { rows: 24, cols: 80 }, () => {});
 
     const readStream = fs.createReadStream('', { fd: pty.fd });
     const writeStream = fs.createWriteStream('', { fd: pty.fd });
@@ -101,7 +111,7 @@ describe('PTY', () => {
 
   test('respects working directory', (done) => {
     const pty = new Pty(
-      '/bin/pwd',
+      'pwd',
       [],
       {},
       CWD,
@@ -120,12 +130,12 @@ describe('PTY', () => {
     });
   });
 
-  test.skip('respects env', (done) => {
+  test('respects env', (done) => {
     const message = 'hello from env';
     let buffer = '';
 
     const pty = new Pty(
-      '/bin/sh',
+      'sh',
       ['-c', 'sleep 0.1s && echo $ENV_VARIABLE && exit'],
       {
         ENV_VARIABLE: message,
@@ -151,14 +161,7 @@ describe('PTY', () => {
   test('works with Bun.read & Bun.write', (done) => {
     const message = 'hello bun';
 
-    const pty = new Pty(
-      '/bin/cat',
-      [],
-      {},
-      CWD,
-      { rows: 24, cols: 80 },
-      () => {},
-    );
+    const pty = new Pty('cat', [], {}, CWD, { rows: 24, cols: 80 }, () => {});
 
     const file = Bun.file(pty.fd);
 
