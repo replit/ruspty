@@ -27,8 +27,14 @@ jobs:
       fail-fast: false
       matrix:
         settings:
-          - host: macos-latest
+          # https://docs.github.com/en/actions/using-github-hosted-runners/about-github-hosted-runners/about-github-hosted-runners#standard-github-hosted-runners-for-public-repositories
+          - host: macos-13 
             target: x86_64-apple-darwin
+            build: |
+              bun run build
+              strip -x *.node
+          - host: macos-14
+            target: aarch64-apple-darwin
             build: |
               bun run build
               strip -x *.node
