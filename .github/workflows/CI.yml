@@ -116,6 +116,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Setup Bun
         uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: 1.0.30
       - name: Setup node
         uses: actions/setup-node@v4
         with:
@@ -147,6 +149,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Setup Bun
         uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: 1.0.30
       - name: Setup node
         uses: actions/setup-node@v4
         with:
@@ -174,6 +178,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Setup Bun
         uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: 1.0.30
       - name: Setup node
         uses: actions/setup-node@v4
         with:
