@@ -20,7 +20,7 @@ describe('PTY', () => {
       },
     );
 
-    const readStream = fs.createReadStream('', { fd: pty.fd, start: 0 });
+    const readStream = fs.createReadStream('', { fd: pty.fd });
 
     readStream.on('data', (chunk) => {
       expect(chunk.toString()).toBe(message + '\r\n');
@@ -54,7 +54,7 @@ describe('PTY', () => {
       () => {},
     );
 
-    const readStream = fs.createReadStream('', { fd: pty.fd, start: 0 });
+    const readStream = fs.createReadStream('', { fd: pty.fd });
     const writeStream = fs.createWriteStream('', { fd: pty.fd });
 
     readStream.on('data', (chunk) => {
@@ -75,7 +75,7 @@ describe('PTY', () => {
       () => {},
     );
 
-    const readStream = fs.createReadStream('', { fd: pty.fd, start: 0 });
+    const readStream = fs.createReadStream('', { fd: pty.fd });
     const writeStream = fs.createWriteStream('', { fd: pty.fd });
 
     let buffer = '';
@@ -113,7 +113,7 @@ describe('PTY', () => {
       },
     );
 
-    const readStream = fs.createReadStream('', { fd: pty.fd, start: 0 });
+    const readStream = fs.createReadStream('', { fd: pty.fd });
 
     readStream.on('data', (chunk) => {
       expect(chunk.toString()).toBe(`${CWD}\r\n`);
@@ -141,7 +141,7 @@ describe('PTY', () => {
       },
     );
 
-    const readStream = fs.createReadStream('', { fd: pty.fd, start: 0 });
+    const readStream = fs.createReadStream('', { fd: pty.fd });
 
     readStream.on('data', (chunk) => {
       buffer += chunk.toString();
