@@ -29,6 +29,7 @@ jobs:
         settings:
           - host: macos-latest
             target: x86_64-apple-darwin
+            architecture: x64
             build: |-
               set -e &&
               bun run build --target x86_64-apple-darwin &&
@@ -107,6 +108,7 @@ jobs:
         settings:
           - host: macos-latest
             target: x86_64-apple-darwin
+            architecture: x64
     runs-on: ${{ matrix.settings.host }}
     steps:
       - uses: actions/checkout@v4
@@ -118,6 +120,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          architecture: ${{ matrix.settings.architecture }}
       - name: Install dependencies
         run: bun install
       - name: Download artifacts
