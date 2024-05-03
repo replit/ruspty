@@ -161,7 +161,7 @@ jobs:
         run: ls -R .
         shell: bash
       - name: Test bindings
-        run: docker run --rm -v $(pwd):/build -w /build oven/bun:1 bun test
+        run: docker run --rm -v $(pwd):/build -w /build oven/bun:1.0.26 bun test
 
   publish:
     name: Publish
