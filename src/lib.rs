@@ -107,9 +107,9 @@ impl Pty {
         .map_err(|err| NAPI_ERROR::new(napi::Status::GenericFailure, err))?;
     }
 
-    cmd.stdin(unsafe { Stdio::from_raw_fd(fd_user) });
-    cmd.stderr(unsafe { Stdio::from_raw_fd(fd_user) });
-    cmd.stdout(unsafe { Stdio::from_raw_fd(fd_user) });
+    cmd.stdin(unsafe { Stdio::from_raw_fd(fd_controller) });
+    cmd.stderr(unsafe { Stdio::from_raw_fd(fd_controller) });
+    cmd.stdout(unsafe { Stdio::from_raw_fd(fd_controller) });
 
     cmd.envs(envs);
     cmd.current_dir(dir);
@@ -121,7 +121,7 @@ impl Pty {
           return Err(Error::new(ErrorKind::Other, "Failed to set session id"));
         }
 
-        set_controlling_terminal(fd_user)?;
+        set_controlling_terminal(0)?;
 
         libc::close(fd_user);
         libc::close(fd_controller);
@@ -146,10 +146,10 @@ impl Pty {
 
     let pid = child.id();
 
-    set_nonblocking(fd_controller)?;
-
-    let file = File::from(pty_pair.controller);
+    // Now that we have opened the child, we can move the FD into a File.
+    let file = File::from(pty_pair.user);
     let fd = file.as_raw_fd();
+    drop(pty_pair.controller);
 
     // We're creating a new thread for every child, this uses a bit more system resources compared
     // to alternatives (below), trading off simplicity of implementation.
