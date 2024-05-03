@@ -22,16 +22,9 @@ extern crate napi_derive;
 #[napi]
 #[allow(dead_code)]
 struct Pty {
-  cmd: Command,
-  file_controller: File,
-  file_user: File,
-
+  file: File,
   #[napi(ts_type = "number")]
   pub fd: c_int,
-}
-
-#[napi(object)]
-struct Pid {
   pub pid: u32,
 }
 
@@ -90,6 +83,7 @@ impl Pty {
     envs: HashMap<String, String>,
     dir: String,
     size: Size,
+    #[napi(ts_arg_type = "(err: null | Error, exitCode: number) => void")] on_exit: JsFunction,
   ) -> Result<Self, NAPI_ERROR> {
     let window_size = Winsize {
       ws_col: size.cols,
@@ -99,10 +93,7 @@ impl Pty {
     };
 
     let mut cmd = Command::new(command);
-
     cmd.args(args);
-    cmd.envs(envs);
-    cmd.current_dir(dir);
 
     let pty_pair = openpty(None, Some(&window_size))
       .map_err(|err| NAPI_ERROR::new(napi::Status::GenericFailure, err))?;
@@ -110,43 +101,21 @@ impl Pty {
     let fd_controller = pty_pair.controller.as_raw_fd();
     let fd_user = pty_pair.user.as_raw_fd();
 
+    if let Ok(mut termios) = termios::tcgetattr(&pty_pair.controller) {
+      termios.input_modes.set(InputModes::IUTF8, true);
+      termios::tcsetattr(&pty_pair.controller, OptionalActions::Now, &termios)
+        .map_err(|err| NAPI_ERROR::new(napi::Status::GenericFailure, err))?;
+    }
+
     cmd.stdin(unsafe { Stdio::from_raw_fd(fd_user) });
     cmd.stderr(unsafe { Stdio::from_raw_fd(fd_user) });
     cmd.stdout(unsafe { Stdio::from_raw_fd(fd_user) });
 
-    let file_controller = File::from(pty_pair.controller);
-    let file_user = File::from(pty_pair.user);
-
-    Ok(Pty {
-      fd: fd_controller,
-      cmd,
-      file_controller,
-      file_user,
-    })
-  }
-
-  #[napi]
-  #[allow(dead_code)]
-  pub fn start(
-    &mut self,
-    #[napi(ts_arg_type = "(err: null | Error, exitCode: number) => void")] on_exit: JsFunction,
-  ) -> Result<Pid, NAPI_ERROR> {
-    let ts_on_exit: ThreadsafeFunction<i32, ErrorStrategy::CalleeHandled> = on_exit
-      .create_threadsafe_function(0, |ctx| ctx.env.create_int32(ctx.value).map(|v| vec![v]))?;
-
-    if let Ok(mut termios) = termios::tcgetattr(&self.file_controller) {
-      termios.input_modes.set(InputModes::IUTF8, true);
-      termios::tcsetattr(&self.file_controller, OptionalActions::Now, &termios)
-        .map_err(|err| NAPI_ERROR::new(napi::Status::GenericFailure, err))?;
-    }
-
-    let fd_user = self.file_user.as_raw_fd();
-    let fd_controller = self.file_controller.as_raw_fd();
-
-    set_nonblocking(fd_controller)?;
+    cmd.envs(envs);
+    cmd.current_dir(dir);
 
     unsafe {
-      self.cmd.pre_exec(move || {
+      cmd.pre_exec(move || {
         let err = libc::setsid();
         if err == -1 {
           return Err(Error::new(ErrorKind::Other, "Failed to set session id"));
@@ -168,12 +137,19 @@ impl Pty {
       });
     }
 
-    let mut child = self
-      .cmd
+    let ts_on_exit: ThreadsafeFunction<i32, ErrorStrategy::CalleeHandled> = on_exit
+      .create_threadsafe_function(0, |ctx| ctx.env.create_int32(ctx.value).map(|v| vec![v]))?;
+
+    let mut child = cmd
       .spawn()
       .map_err(|err| NAPI_ERROR::new(GenericFailure, err))?;
 
     let pid = child.id();
+
+    set_nonblocking(fd_controller)?;
+
+    let file = File::from(pty_pair.controller);
+    let fd = file.as_raw_fd();
 
     // We're creating a new thread for every child, this uses a bit more system resources compared
     // to alternatives (below), trading off simplicity of implementation.
@@ -216,11 +192,11 @@ impl Pty {
 
       // Close the fd once we return from `child.wait()`.
       unsafe {
-        rustix::io::close(fd_controller);
+        rustix::io::close(fd);
       }
     });
 
-    Ok(Pid { pid })
+    Ok(Pty { file, fd, pid })
   }
 
   #[napi]
