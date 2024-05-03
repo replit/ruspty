@@ -1,33 +1,77 @@
-use libc::{self, c_int, TIOCSCTTY};
-use napi::bindgen_prelude::JsFunction;
-use napi::threadsafe_function::{ErrorStrategy, ThreadsafeFunction, ThreadsafeFunctionCallMode};
-use napi::Error as NAPI_ERROR;
-use napi::Status::GenericFailure;
-use rustix_openpty::openpty;
-use rustix_openpty::rustix::termios::Winsize;
-use rustix_openpty::rustix::termios::{self, InputModes, OptionalActions};
 use std::collections::HashMap;
-use std::fs::File;
 use std::io::Error;
 use std::io::ErrorKind;
-use std::os::fd::AsRawFd;
-use std::os::fd::FromRawFd;
+use std::os::fd::{AsRawFd, OwnedFd};
 use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
 use std::thread;
 
+use libc::{self, c_int};
+use napi::bindgen_prelude::JsFunction;
+use napi::threadsafe_function::{ErrorStrategy, ThreadsafeFunction, ThreadsafeFunctionCallMode};
+use napi::Status::GenericFailure;
+use napi::{self, Env};
+use rustix_openpty::openpty;
+use rustix_openpty::rustix::termios::{self, InputModes, OptionalActions, Winsize};
+
 #[macro_use]
 extern crate napi_derive;
 
+/// A very thin wrapper around PTYs and processes. The caller is responsible for calling `.close()`
+/// when all streams have been closed. We hold onto both ends of the PTY (controller and user) to
+/// prevent reads from erroring out with EIO.
+///
+/// This is the recommended usage:
+///
+/// ```
+/// const { Pty } = require('replit-ruspy');
+/// const fs = require('node:fs');
+///
+/// const pty = new Pty('sh', [], ENV, CWD, { rows: 24, cols: 80 }, (...result) => {
+///   pty.close();
+///   // TODO: Handle process exit.
+/// });
+///
+/// const read = new fs.createReadStream('', {
+///   fd: pty.fd(),
+///   start: 0,
+///   highWaterMark: 16 * 1024,
+///   autoClose: true,
+/// });
+/// const write = new fs.createWriteStream('', {
+///   fd: pty.fd(),
+///   autoClose: true,
+/// });
+///
+/// read.on('data', (chunk) => {
+///   // TODO: Handle data.
+/// });
+/// read.on('error', (err) => {
+///   if (err.code && err.code.indexOf('EIO') !== -1) {
+///     // This is expected to happen when the process exits.
+///     return;
+///   }
+///   // TODO: Handle the error.
+/// });
+/// write.on('error', (err) => {
+///   if (err.code && err.code.indexOf('EIO') !== -1) {
+///     // This is expected to happen when the process exits.
+///     return;
+///   }
+///   // TODO: Handle the error.
+/// });
+/// ```
 #[napi]
 #[allow(dead_code)]
 struct Pty {
-  file: File,
-  #[napi(ts_type = "number")]
-  pub fd: c_int,
+  controller_fd: Option<OwnedFd>,
+  user_fd: Option<OwnedFd>,
+  should_dup_fds: bool,
+  /// The pid of the forked process.
   pub pid: u32,
 }
 
+/// A size struct to pass to resize.
 #[napi(object)]
 struct Size {
   pub cols: u16,
@@ -38,7 +82,7 @@ struct Size {
 fn set_controlling_terminal(fd: c_int) -> Result<(), Error> {
   let res = unsafe {
     #[allow(clippy::cast_lossless)]
-    libc::ioctl(fd, TIOCSCTTY as _, 0)
+    libc::ioctl(fd, libc::TIOCSCTTY as _, 0)
   };
 
   if res != 0 {
@@ -49,13 +93,13 @@ fn set_controlling_terminal(fd: c_int) -> Result<(), Error> {
 }
 
 #[allow(dead_code)]
-fn set_nonblocking(fd: c_int) -> Result<(), NAPI_ERROR> {
+fn set_nonblocking(fd: c_int) -> Result<(), napi::Error> {
   use libc::{fcntl, F_GETFL, F_SETFL, O_NONBLOCK};
 
   let status_flags = unsafe { fcntl(fd, F_GETFL, 0) };
 
   if status_flags < 0 {
-    return Err(NAPI_ERROR::new(
+    return Err(napi::Error::new(
       napi::Status::GenericFailure,
       format!("fcntl F_GETFL failed: {}", Error::last_os_error()),
     ));
@@ -64,7 +108,7 @@ fn set_nonblocking(fd: c_int) -> Result<(), NAPI_ERROR> {
   let res = unsafe { fcntl(fd, F_SETFL, status_flags | O_NONBLOCK) };
 
   if res != 0 {
-    return Err(NAPI_ERROR::new(
+    return Err(napi::Error::new(
       napi::Status::GenericFailure,
       format!("fcntl F_SETFL failed: {}", Error::last_os_error()),
     ));
@@ -78,13 +122,15 @@ impl Pty {
   #[napi(constructor)]
   #[allow(dead_code)]
   pub fn new(
+    env: Env,
     command: String,
     args: Vec<String>,
     envs: HashMap<String, String>,
     dir: String,
     size: Size,
     #[napi(ts_arg_type = "(err: null | Error, exitCode: number) => void")] on_exit: JsFunction,
-  ) -> Result<Self, NAPI_ERROR> {
+  ) -> Result<Self, napi::Error> {
+    let should_dup_fds = env.get_node_version()?.release == "node";
     let window_size = Winsize {
       ws_col: size.cols,
       ws_row: size.rows,
@@ -95,36 +141,43 @@ impl Pty {
     let mut cmd = Command::new(command);
     cmd.args(args);
 
-    let pty_pair = openpty(None, Some(&window_size))
-      .map_err(|err| NAPI_ERROR::new(napi::Status::GenericFailure, err))?;
+    let rustix_openpty::Pty {
+      controller: controller_fd,
+      user: user_fd,
+    } = openpty(None, Some(&window_size))
+      .map_err(|err| napi::Error::new(napi::Status::GenericFailure, err))?;
 
-    let fd_controller = pty_pair.controller.as_raw_fd();
-    let fd_user = pty_pair.user.as_raw_fd();
-
-    if let Ok(mut termios) = termios::tcgetattr(&pty_pair.controller) {
+    if let Ok(mut termios) = termios::tcgetattr(&controller_fd) {
       termios.input_modes.set(InputModes::IUTF8, true);
-      termios::tcsetattr(&pty_pair.controller, OptionalActions::Now, &termios)
-        .map_err(|err| NAPI_ERROR::new(napi::Status::GenericFailure, err))?;
+      termios::tcsetattr(&controller_fd, OptionalActions::Now, &termios)
+        .map_err(|err| napi::Error::new(napi::Status::GenericFailure, err))?;
     }
 
-    cmd.stdin(unsafe { Stdio::from_raw_fd(fd_user) });
-    cmd.stderr(unsafe { Stdio::from_raw_fd(fd_user) });
-    cmd.stdout(unsafe { Stdio::from_raw_fd(fd_user) });
+    // The Drop implementation for Command will try to close _each_ stdio. That implies that it
+    // will try to close the three of them, so if we don't dup them, Rust will try to close the
+    // same FD three times, and if stars don't align, we might be even closing a different FD
+    // accidentally.
+    cmd.stdin(Stdio::from(user_fd.try_clone()?));
+    cmd.stderr(Stdio::from(user_fd.try_clone()?));
+    cmd.stdout(Stdio::from(user_fd.try_clone()?));
 
     cmd.envs(envs);
     cmd.current_dir(dir);
 
     unsafe {
+      let raw_user_fd = user_fd.as_raw_fd();
+      let raw_controller_fd = controller_fd.as_raw_fd();
       cmd.pre_exec(move || {
         let err = libc::setsid();
         if err == -1 {
           return Err(Error::new(ErrorKind::Other, "Failed to set session id"));
         }
 
-        set_controlling_terminal(fd_user)?;
+        // stdin is wired to the tty, so we can use that for the controlling terminal.
+        set_controlling_terminal(0)?;
 
-        libc::close(fd_user);
-        libc::close(fd_controller);
+        libc::close(raw_user_fd);
+        libc::close(raw_controller_fd);
 
         libc::signal(libc::SIGCHLD, libc::SIG_DFL);
         libc::signal(libc::SIGHUP, libc::SIG_DFL);
@@ -137,19 +190,14 @@ impl Pty {
       });
     }
 
-    let ts_on_exit: ThreadsafeFunction<i32, ErrorStrategy::CalleeHandled> = on_exit
-      .create_threadsafe_function(0, |ctx| ctx.env.create_int32(ctx.value).map(|v| vec![v]))?;
-
     let mut child = cmd
       .spawn()
-      .map_err(|err| NAPI_ERROR::new(GenericFailure, err))?;
+      .map_err(|err| napi::Error::new(GenericFailure, err))?;
 
+    // We are marking the pty fd as non-blocking, despite Node's docs suggesting that the fd passed
+    // to `createReadStream`/`createWriteStream` should be blocking.
+    set_nonblocking(controller_fd.as_raw_fd())?;
     let pid = child.id();
-
-    set_nonblocking(fd_controller)?;
-
-    let file = File::from(pty_pair.controller);
-    let fd = file.as_raw_fd();
 
     // We're creating a new thread for every child, this uses a bit more system resources compared
     // to alternatives (below), trading off simplicity of implementation.
@@ -164,44 +212,45 @@ impl Pty {
     //   they are ready to be `wait`'ed. This has the inconvenience that it consumes one FD per child.
     //
     // For discussion check out: https://github.com/replit/ruspty/pull/1#discussion_r1463672548
-    thread::spawn(move || {
-      match child.wait() {
-        Ok(status) => {
-          if status.success() {
-            ts_on_exit.call(Ok(0), ThreadsafeFunctionCallMode::Blocking);
-          } else {
-            ts_on_exit.call(
-              Ok(status.code().unwrap_or(-1)),
-              ThreadsafeFunctionCallMode::Blocking,
-            );
-          }
-        }
-        Err(err) => {
+    let ts_on_exit: ThreadsafeFunction<i32, ErrorStrategy::CalleeHandled> = on_exit
+      .create_threadsafe_function(0, |ctx| ctx.env.create_int32(ctx.value).map(|v| vec![v]))?;
+    thread::spawn(move || match child.wait() {
+      Ok(status) => {
+        if status.success() {
+          ts_on_exit.call(Ok(0), ThreadsafeFunctionCallMode::Blocking);
+        } else {
           ts_on_exit.call(
-            Err(NAPI_ERROR::new(
-              GenericFailure,
-              format!(
-                "OS error when waiting for child process to exit: {}",
-                err.raw_os_error().unwrap_or(-1)
-              ),
-            )),
+            Ok(status.code().unwrap_or(-1)),
             ThreadsafeFunctionCallMode::Blocking,
           );
         }
       }
-
-      // Close the fd once we return from `child.wait()`.
-      unsafe {
-        rustix::io::close(fd);
+      Err(err) => {
+        ts_on_exit.call(
+          Err(napi::Error::new(
+            GenericFailure,
+            format!(
+              "OS error when waiting for child process to exit: {}",
+              err.raw_os_error().unwrap_or(-1)
+            ),
+          )),
+          ThreadsafeFunctionCallMode::Blocking,
+        );
       }
     });
 
-    Ok(Pty { file, fd, pid })
+    Ok(Pty {
+      controller_fd: Some(controller_fd),
+      user_fd: Some(user_fd),
+      should_dup_fds,
+      pid,
+    })
   }
 
+  /// Resize the terminal.
   #[napi]
   #[allow(dead_code)]
-  pub fn resize(&mut self, size: Size) -> Result<(), NAPI_ERROR> {
+  pub fn resize(&mut self, size: Size) -> Result<(), napi::Error> {
     let window_size = Winsize {
       ws_col: size.cols,
       ws_row: size.rows,
@@ -209,14 +258,72 @@ impl Pty {
       ws_ypixel: 0,
     };
 
-    let res = unsafe { libc::ioctl(self.fd, libc::TIOCSWINSZ, &window_size as *const _) };
+    if let Some(fd) = &self.controller_fd {
+      let res = unsafe { libc::ioctl(fd.as_raw_fd(), libc::TIOCSWINSZ, &window_size as *const _) };
 
-    if res != 0 {
-      return Err(NAPI_ERROR::new(
+      if res != 0 {
+        return Err(napi::Error::new(
+          napi::Status::GenericFailure,
+          format!("ioctl TIOCSWINSZ failed: {}", Error::last_os_error()),
+        ));
+      }
+
+      Ok(())
+    } else {
+      Err(napi::Error::new(
         napi::Status::GenericFailure,
-        format!("ioctl TIOCSWINSZ failed: {}", Error::last_os_error()),
+        "ioctl TIOCSWINSZ failed: bad file descriptor (os error 9)",
+      ))
+    }
+  }
+
+  /// Returns a file descriptor for the PTY controller. If running under node, it will dup the file
+  /// descriptor, but under bun it will return the same file desciptor, since bun does not close
+  /// the streams by itself. Maybe that is a bug in bun, so we should confirm the new behavior
+  /// after we upgrade.
+  ///
+  /// See the docstring of the class for an usage example.
+  #[napi]
+  #[allow(dead_code)]
+  pub fn fd(&mut self) -> Result<c_int, napi::Error> {
+    if let Some(fd) = &self.controller_fd {
+      if !self.should_dup_fds {
+        return Ok(fd.as_raw_fd());
+      }
+      let res = unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_DUPFD_CLOEXEC, 3) };
+      if res < 0 {
+        return Err(napi::Error::new(
+          napi::Status::GenericFailure,
+          format!("fcntl F_DUPFD_CLOEXEC failed: {}", Error::last_os_error()),
+        ));
+      }
+      Ok(res)
+    } else {
+      Err(napi::Error::new(
+        napi::Status::GenericFailure,
+        "fcntl F_DUPFD_CLOEXEC failed: bad file descriptor (os error 9)",
+      ))
+    }
+  }
+
+  /// Close the PTY file descriptor. This must be called when the readers / writers of the PTY have
+  /// been closed, otherwise we will leak file descriptors!
+  ///
+  /// In an ideal world, this would be automatically called after the wait loop is done, but Node
+  /// doesn't like that one bit, since it implies that the file is closed outside of the main
+  /// event loop.
+  #[napi]
+  #[allow(dead_code)]
+  pub fn close(&mut self) -> Result<(), napi::Error> {
+    let controller_fd = self.controller_fd.take();
+    let user_fd = self.user_fd.take();
+    if controller_fd.is_none() {
+      return Err(napi::Error::new(
+        napi::Status::GenericFailure,
+        format!("close failed: {}", libc::EBADF),
       ));
     }
+    drop(user_fd);
 
     Ok(())
   }
