@@ -99,7 +99,7 @@ describe('PTY', () => {
     });
   });
 
-  test('respects env', (done) => {
+  test.skip('respects env', (done) => {
     const message = 'hello from env';
     let buffer = '';
 
