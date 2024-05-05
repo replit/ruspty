@@ -11,6 +11,7 @@ export interface PtyOptions {
   dir?: string
   size?: Size
   onExit: (err: null | Error, exitCode: number) => void
+  onData?: (err: null | Error, data: Buffer) => void
 }
 /** A size struct to pass to resize. */
 export interface Size {
@@ -62,6 +63,9 @@ export interface Size {
  *   // TODO: Handle the error.
  * });
  * ```
+ *
+ * The last parameter (a callback that gets stdin chunks) is optional and is only there for
+ * compatibility with bun 1.1.7.
  */
 export class Pty {
   /** The pid of the forked process. */

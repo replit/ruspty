@@ -275,6 +275,31 @@ describe('PTY', () => {
     },
   );
 
+  // This test is not supported on Darwin at all.
+  (os.type() !== 'Darwin' ? test : test.skip)(
+    'works with data callback',
+    (done) => {
+      const message = 'hello bun\n';
+      let buffer = '';
+
+      const pty = new Pty({
+        command: '/bin/cat',
+        onExit: () => {
+          expect(buffer).toBe('hello bun\r\nhello bun\r\n');
+          pty.close();
+
+          done();
+        },
+        onData: (err, chunk) => {
+          expect(err).toBeNull();
+          buffer += chunk.toString();
+        },
+      });
+
+      Bun.write(pty.fd(), message + EOT + EOT);
+    },
+  );
+
   test("doesn't break when executing non-existing binary", (done) => {
     try {
       new Pty({
