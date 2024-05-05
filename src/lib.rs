@@ -71,6 +71,18 @@ struct Pty {
   pub pid: u32,
 }
 
+/// The options that can be passed to the constructor of Pty.
+#[napi(object)]
+struct PtyOptions {
+  pub command: String,
+  pub args: Option<Vec<String>>,
+  pub envs: Option<HashMap<String, String>>,
+  pub dir: Option<String>,
+  pub size: Option<Size>,
+  #[napi(ts_type = "(err: null | Error, exitCode: number) => void")]
+  pub on_exit: JsFunction,
+}
+
 /// A size struct to pass to resize.
 #[napi(object)]
 struct Size {
@@ -121,16 +133,9 @@ fn set_nonblocking(fd: c_int) -> Result<(), napi::Error> {
 impl Pty {
   #[napi(constructor)]
   #[allow(dead_code)]
-  pub fn new(
-    env: Env,
-    command: String,
-    args: Vec<String>,
-    envs: HashMap<String, String>,
-    dir: String,
-    size: Size,
-    #[napi(ts_arg_type = "(err: null | Error, exitCode: number) => void")] on_exit: JsFunction,
-  ) -> Result<Self, napi::Error> {
+  pub fn new(env: Env, opts: PtyOptions) -> Result<Self, napi::Error> {
     let should_dup_fds = env.get_node_version()?.release == "node";
+    let size = opts.size.unwrap_or(Size { cols: 80, rows: 24 });
     let window_size = Winsize {
       ws_col: size.cols,
       ws_row: size.rows,
@@ -138,8 +143,10 @@ impl Pty {
       ws_ypixel: 0,
     };
 
-    let mut cmd = Command::new(command);
-    cmd.args(args);
+    let mut cmd = Command::new(opts.command);
+    if let Some(args) = opts.args {
+      cmd.args(args);
+    }
 
     let rustix_openpty::Pty {
       controller: controller_fd,
@@ -161,8 +168,12 @@ impl Pty {
     cmd.stderr(Stdio::from(user_fd.try_clone()?));
     cmd.stdout(Stdio::from(user_fd.try_clone()?));
 
-    cmd.envs(envs);
-    cmd.current_dir(dir);
+    if let Some(envs) = opts.envs {
+      cmd.envs(envs);
+    }
+    if let Some(dir) = opts.dir {
+      cmd.current_dir(dir);
+    }
 
     unsafe {
       let raw_user_fd = user_fd.as_raw_fd();
@@ -212,7 +223,8 @@ impl Pty {
     //   they are ready to be `wait`'ed. This has the inconvenience that it consumes one FD per child.
     //
     // For discussion check out: https://github.com/replit/ruspty/pull/1#discussion_r1463672548
-    let ts_on_exit: ThreadsafeFunction<i32, ErrorStrategy::CalleeHandled> = on_exit
+    let ts_on_exit: ThreadsafeFunction<i32, ErrorStrategy::CalleeHandled> = opts
+      .on_exit
       .create_threadsafe_function(0, |ctx| ctx.env.create_int32(ctx.value).map(|v| vec![v]))?;
     thread::spawn(move || match child.wait() {
       Ok(status) => {
