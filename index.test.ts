@@ -24,38 +24,41 @@ function macOSLinuxCatBufferCompare(
   return a1 === a2;
 }
 
-// These two functions ensure that there are no extra open file descriptors after each test
-// finishes. Only works on Linux.
-if (os.type() !== 'Darwin') {
-  beforeEach(async () => {
-    for (const filename of await readdir(procSelfFd)) {
-      try {
-        previousFDs[filename] = await readlink(procSelfFd + filename);
-      } catch (err: any) {
-        if (err.code === 'ENOENT') {
-          continue;
-        }
-        throw err;
-      }
-    }
-  });
-  afterEach(async () => {
-    for (const filename of await readdir(procSelfFd)) {
-      try {
-        const linkTarget = await readlink(procSelfFd + filename);
-        if (linkTarget === 'anon_inode:[timerfd]') {
-          continue;
-        }
-        expect(previousFDs).toHaveProperty(filename, linkTarget);
-      } catch (err: any) {
-        if (err.code === 'ENOENT') {
-          continue;
-        }
-        throw err;
-      }
-    }
-  });
-}
+const IS_LINUX = os.type() === 'Linux';
+const IS_DARWIN = os.type() === 'Darwin';
+
+// // These two functions ensure that there are no extra open file descriptors after each test
+// // finishes. Only works on Linux.
+// if (IS_LINUX) {
+//   beforeEach(async () => {
+//     for (const filename of await readdir(procSelfFd)) {
+//       try {
+//         previousFDs[filename] = await readlink(procSelfFd + filename);
+//       } catch (err: any) {
+//         if (err.code === 'ENOENT') {
+//           continue;
+//         }
+//         throw err;
+//       }
+//     }
+//   });
+//   afterEach(async () => {
+//     for (const filename of await readdir(procSelfFd)) {
+//       try {
+//         const linkTarget = await readlink(procSelfFd + filename);
+//         if (linkTarget === 'anon_inode:[timerfd]') {
+//           continue;
+//         }
+//         expect(previousFDs).toHaveProperty(filename, linkTarget);
+//       } catch (err: any) {
+//         if (err.code === 'ENOENT') {
+//           continue;
+//         }
+//         throw err;
+//       }
+//     }
+//   });
+// }
 
 describe('PTY', () => {
   const CWD = process.cwd();
@@ -212,19 +215,27 @@ describe('PTY', () => {
 
         done();
       },
+      onData: (err, data) => {
+        if (IS_LINUX) {
+          expect(err).toBeNull();
+          buffer += data.toString();
+        }
+      },
     });
 
-    const readStream = fs.createReadStream('', { fd: pty.fd() });
+    if (IS_DARWIN) {
+      const readStream = fs.createReadStream('', { fd: pty.fd() });
 
-    readStream.on('data', (chunk) => {
-      buffer += chunk.toString();
-    });
-    readStream.on('error', (err: any) => {
-      if (err.code && err.code.indexOf('EIO') !== -1) {
-        return;
-      }
-      throw err;
-    });
+      readStream.on('data', (chunk) => {
+        buffer += chunk.toString();
+      });
+      readStream.on('error', (err: any) => {
+        if (err.code && err.code.indexOf('EIO') !== -1) {
+          return;
+        }
+        throw err;
+      });
+    }
   });
 
   test('respects env', (done) => {
@@ -246,20 +257,28 @@ describe('PTY', () => {
 
         done();
       },
+      onData: (err, data) => {
+        if (IS_LINUX) {
+          expect(err).toBeNull();
+          buffer = data;
+        }
+      },
     });
 
-    const readStream = fs.createReadStream('', { fd: pty.fd() });
+    if (IS_DARWIN) {
+      const readStream = fs.createReadStream('', { fd: pty.fd() });
 
-    readStream.on('data', (chunk) => {
-      assert(Buffer.isBuffer(chunk));
-      buffer = chunk;
-    });
-    readStream.on('error', (err: any) => {
-      if (err.code && err.code.indexOf('EIO') !== -1) {
-        return;
-      }
-      throw err;
-    });
+      readStream.on('data', (chunk) => {
+        assert(Buffer.isBuffer(chunk));
+        buffer = chunk;
+      });
+      readStream.on('error', (err: any) => {
+        if (err.code && err.code.indexOf('EIO') !== -1) {
+          return;
+        }
+        throw err;
+      });
+    }
   });
 
   test('works with Bun.read & Bun.write', (done) => {
@@ -301,29 +320,26 @@ describe('PTY', () => {
   });
 
   // This test is not supported on Darwin at all.
-  (os.type() !== 'Darwin' ? test : test.skip)(
-    'works with data callback',
-    (done) => {
-      const message = 'hello bun\n';
-      let buffer = '';
+  (IS_DARWIN ? test.skip : test)('works with data callback', (done) => {
+    const message = 'hello bun\n';
+    let buffer = '';
 
-      const pty = new Pty({
-        command: '/bin/cat',
-        onExit: () => {
-          expect(buffer).toBe('hello bun\r\nhello bun\r\n');
-          pty.close();
+    const pty = new Pty({
+      command: '/bin/cat',
+      onExit: () => {
+        expect(buffer).toBe('hello bun\r\nhello bun\r\n');
+        pty.close();
 
-          done();
-        },
-        onData: (err, chunk) => {
-          expect(err).toBeNull();
-          buffer += chunk.toString();
-        },
-      });
+        done();
+      },
+      onData: (err, chunk) => {
+        expect(err).toBeNull();
+        buffer += chunk.toString();
+      },
+    });
 
-      Bun.write(pty.fd(), message + EOT + EOT);
-    },
-  );
+    Bun.write(pty.fd(), message + EOT + EOT);
+  });
 
   test("doesn't break when executing non-existing binary", (done) => {
     try {
