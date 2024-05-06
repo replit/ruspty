@@ -233,11 +233,11 @@ describe('PTY', () => {
 
   test('respects env', (done) => {
     const message = 'hello from env';
-    let buffer = '';
+    let buffer: Buffer | undefined;
 
     const pty = new Pty(
       '/bin/sh',
-      ['-c', 'sleep 0.1s && echo $ENV_VARIABLE && exit'],
+      ['-c', 'echo $ENV_VARIABLE && exit'],
       {
         ENV_VARIABLE: message,
       },
@@ -246,7 +246,8 @@ describe('PTY', () => {
       (err, exitCode) => {
         expect(err).toBeNull();
         expect(exitCode).toBe(0);
-        expect(buffer).toBe(message + '\r\n');
+        assert(buffer);
+        expect(Buffer.compare(buffer, Buffer.from(message + '\r\n'))).toBe(0);
         pty.close();
 
         done();
@@ -256,7 +257,8 @@ describe('PTY', () => {
     const readStream = fs.createReadStream('', { fd: pty.fd() });
 
     readStream.on('data', (chunk) => {
-      buffer += chunk.toString();
+      assert(Buffer.isBuffer(chunk));
+      buffer = chunk;
     });
     readStream.on('error', (err: any) => {
       if (err.code && err.code.indexOf('EIO') !== -1) {
