@@ -1,6 +1,6 @@
 {
   "name": "@replit/ruspty",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "main": "index.js",
   "types": "index.d.ts",
   "author": "Szymon Kaliski <hi@szymonkaliski.com>",
