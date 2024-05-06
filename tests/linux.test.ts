@@ -134,6 +134,7 @@ describe('PTY', () => {
           pty.resize({ rows: 60, cols: 100 });
           buffer = '';
           writeStream.write("stty size; echo 'done2'\n");
+          writeStream.end(EOT);
         }
 
         if (buffer.includes('done2\r\n')) {
@@ -145,7 +146,6 @@ describe('PTY', () => {
     const writeStream = fs.createWriteStream('', { fd: pty.fd() });
 
     writeStream.write("stty size; echo 'done1'\n");
-    writeStream.end(EOT);
     writeStream.on('error', (err: any) => {
       if (err.code && err.code.indexOf('EIO') !== -1) {
         return;
