@@ -95,8 +95,7 @@ describe('PTY', () => {
     );
   });
 
-  // TODO: Not sure why this is failing in Darwin.
-  (os.type() !== 'Darwin' ? test : test.skip)('can be written to', (done) => {
+  test('can be written to', (done) => {
     // The message should end in newline so that the EOT can signal that the input has ended and not
     // just the line.
     const message = 'hello cat\n';
@@ -104,7 +103,11 @@ describe('PTY', () => {
 
     const pty = new Pty('/bin/cat', [], {}, CWD, { rows: 24, cols: 80 }, () => {
       // We have local echo enabled, so we'll read the message twice.
-      expect(buffer).toBe('hello cat\r\nhello cat\r\n');
+      //
+      // We're using `.toStartWith` instead of `.toBe` here because macOS
+      // output has additional bytes that linux output does not coming from
+      // differences in `cat` implementation.
+      expect(buffer).toStartWith('hello cat\r\nhello cat\r\n');
       pty.close();
 
       done();
@@ -208,8 +211,7 @@ describe('PTY', () => {
     });
   });
 
-  // TODO: Not sure why this is failing in Darwin.
-  (os.type() !== 'Darwin' ? test : test.skip)('respects env', (done) => {
+  test('respects env', (done) => {
     const message = 'hello from env';
     let buffer = '';
 
