@@ -8,6 +8,22 @@ const EOT = '\x04';
 const procSelfFd = '/proc/self/fd/';
 const previousFDs: Record<string, string> = {};
 
+function macOSLinuxCatBufferCompare(
+  b1: Buffer | Uint8Array,
+  b2: Buffer | Uint8Array,
+) {
+  // macOS leaves these bytes when using `cat`, which linux does not
+  //
+  // so to be sure we drop them when comparing the expected to the received
+  // buffer, we'll remove them from the output first, in a super crude manner
+  const macOSStrayBytes = ',94,68,8,8';
+
+  const a1 = Array.from(b1).toString().replaceAll(macOSStrayBytes, '');
+  const a2 = Array.from(b2).toString().replaceAll(macOSStrayBytes, '');
+
+  return a1 === a2;
+}
+
 // These two functions ensure that there are no extra open file descriptors after each test
 // finishes. Only works on Linux.
 if (os.type() !== 'Darwin') {
@@ -104,13 +120,13 @@ describe('PTY', () => {
 
     const result = Buffer.from([
       104, 101, 108, 108, 111, 32, 99, 97, 116, 13, 10, 104, 101, 108, 108, 111,
-      32, 99, 97, 116, 13, 10, 94, 68, 8, 8,
+      32, 99, 97, 116, 13, 10,
     ]);
 
     const pty = new Pty('/bin/cat', [], {}, CWD, { rows: 24, cols: 80 }, () => {
       // We have local echo enabled, so we'll read the message twice.
       assert(buffer);
-      expect(Buffer.compare(buffer, result)).toBe(0);
+      expect(macOSLinuxCatBufferCompare(buffer, result)).toBe(true);
       pty.close();
 
       done();
@@ -255,15 +271,15 @@ describe('PTY', () => {
     let buffer: Uint8Array | undefined;
 
     const result = new Uint8Array([
-      104, 101, 108, 108, 111, 32, 98, 117, 110, 13, 10, 94, 68, 8, 8, 94, 68,
-      8, 8, 104, 101, 108, 108, 111, 32, 98, 117, 110, 13, 10,
+      104, 101, 108, 108, 111, 32, 98, 117, 110, 13, 10, 104, 101, 108, 108,
+      111, 32, 98, 117, 110, 13, 10,
     ]);
 
     const pty = new Pty('/bin/cat', [], {}, CWD, { rows: 24, cols: 80 }, () => {
       // We have local echo enabled, so we'll read the message twice. Furthermore, the newline
       // is converted to `\r\n` in this method.
       assert(buffer !== undefined);
-      expect(Buffer.compare(buffer, result)).toBe(0);
+      expect(macOSLinuxCatBufferCompare(buffer, result)).toBe(true);
       pty.close();
 
       done();
