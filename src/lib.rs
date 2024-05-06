@@ -11,9 +11,11 @@ use napi::bindgen_prelude::{Buffer, JsFunction};
 use napi::threadsafe_function::{ErrorStrategy, ThreadsafeFunction, ThreadsafeFunctionCallMode};
 use napi::Status::GenericFailure;
 use napi::{self, Env};
-use rustix::event::{poll, PollFd, PollFlags};
 use rustix_openpty::openpty;
 use rustix_openpty::rustix::termios::{self, InputModes, OptionalActions, Winsize};
+
+#[cfg(target_os = "linux")]
+use rustix::event::{poll, PollFd, PollFlags};
 
 #[macro_use]
 extern crate napi_derive;

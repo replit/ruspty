@@ -2,10 +2,27 @@ import fs from 'fs';
 import os from 'node:os';
 import { readdir, readlink } from 'node:fs/promises';
 import { Pty } from './index';
+import assert from 'assert';
 
 const EOT = '\x04';
 const procSelfFd = '/proc/self/fd/';
 const previousFDs: Record<string, string> = {};
+
+function macOSLinuxCatBufferCompare(
+  b1: Buffer | Uint8Array,
+  b2: Buffer | Uint8Array,
+) {
+  // macOS leaves these bytes when using `cat`, which linux does not
+  //
+  // so to be sure we drop them when comparing the expected to the received
+  // buffer, we'll remove them from the output first, in a super crude manner
+  const macOSStrayBytes = ',94,68,8,8';
+
+  const a1 = Array.from(b1).toString().replaceAll(macOSStrayBytes, '');
+  const a2 = Array.from(b2).toString().replaceAll(macOSStrayBytes, '');
+
+  return a1 === a2;
+}
 
 // These two functions ensure that there are no extra open file descriptors after each test
 // finishes. Only works on Linux.
@@ -76,7 +93,7 @@ describe('PTY', () => {
   });
 
   test('captures an exit code', (done) => {
-    let pty = new Pty({
+    const pty = new Pty({
       command: '/bin/sh',
       args: ['-c', 'exit 17'],
       onExit: (err, exitCode) => {
@@ -89,18 +106,23 @@ describe('PTY', () => {
     });
   });
 
-  // TODO: Not sure why this is failing in Darwin.
-  (os.type() !== 'Darwin' ? test : test.skip)('can be written to', (done) => {
+  test('can be written to', (done) => {
     // The message should end in newline so that the EOT can signal that the input has ended and not
     // just the line.
     const message = 'hello cat\n';
-    let buffer = '';
+    let buffer: Buffer | undefined;
+
+    const result = Buffer.from([
+      104, 101, 108, 108, 111, 32, 99, 97, 116, 13, 10, 104, 101, 108, 108, 111,
+      32, 99, 97, 116, 13, 10,
+    ]);
 
     const pty = new Pty({
       command: '/bin/cat',
       onExit: () => {
         // We have local echo enabled, so we'll read the message twice.
-        expect(buffer).toBe('hello cat\r\nhello cat\r\n');
+        assert(buffer);
+        expect(macOSLinuxCatBufferCompare(buffer, result)).toBe(true);
         pty.close();
 
         done();
@@ -111,7 +133,8 @@ describe('PTY', () => {
     const writeStream = fs.createWriteStream('', { fd: pty.fd() });
 
     readStream.on('data', (chunk) => {
-      buffer += chunk.toString();
+      assert(Buffer.isBuffer(chunk));
+      buffer = chunk;
     });
     readStream.on('error', (err: any) => {
       if (err.code && err.code.indexOf('EIO') !== -1) {
@@ -205,21 +228,21 @@ describe('PTY', () => {
     });
   });
 
-  // TODO: Not sure why this is failing in Darwin.
-  (os.type() !== 'Darwin' ? test : test.skip)('respects env', (done) => {
+  test('respects env', (done) => {
     const message = 'hello from env';
-    let buffer = '';
+    let buffer: Buffer | undefined;
 
     const pty = new Pty({
       command: '/bin/sh',
-      args: ['-c', 'sleep 0.1s && echo $ENV_VARIABLE && exit'],
+      args: ['-c', 'echo $ENV_VARIABLE && exit'],
       envs: {
         ENV_VARIABLE: message,
       },
       onExit: (err, exitCode) => {
         expect(err).toBeNull();
         expect(exitCode).toBe(0);
-        expect(buffer).toBe(message + '\r\n');
+        assert(buffer);
+        expect(Buffer.compare(buffer, Buffer.from(message + '\r\n'))).toBe(0);
         pty.close();
 
         done();
@@ -229,7 +252,8 @@ describe('PTY', () => {
     const readStream = fs.createReadStream('', { fd: pty.fd() });
 
     readStream.on('data', (chunk) => {
-      buffer += chunk.toString();
+      assert(Buffer.isBuffer(chunk));
+      buffer = chunk;
     });
     readStream.on('error', (err: any) => {
       if (err.code && err.code.indexOf('EIO') !== -1) {
@@ -239,41 +263,43 @@ describe('PTY', () => {
     });
   });
 
-  // TODO: Not sure why this is failing in Darwin.
-  (os.type() !== 'Darwin' ? test : test.skip)(
-    'works with Bun.read & Bun.write',
-    (done) => {
-      const message = 'hello bun\n';
-      let buffer = '';
+  test('works with Bun.read & Bun.write', (done) => {
+    const message = 'hello bun\n';
+    let buffer: Uint8Array | undefined;
 
-      const pty = new Pty({
-        command: '/bin/cat',
-        onExit: (_err, _exitCode) => {
-          // We have local echo enabled, so we'll read the message twice. Furthermore, the newline
-          // is converted to `\r\n` in this method.
-          expect(buffer).toBe('hello bun\r\nhello bun\r\n');
-          pty.close();
+    const result = new Uint8Array([
+      104, 101, 108, 108, 111, 32, 98, 117, 110, 13, 10, 104, 101, 108, 108,
+      111, 32, 98, 117, 110, 13, 10,
+    ]);
 
-          done();
-        },
-      });
+    const pty = new Pty({
+      command: '/bin/cat',
+      onExit: () => {
+        // We have local echo enabled, so we'll read the message twice. Furthermore, the newline
+        // is converted to `\r\n` in this method.
+        assert(buffer !== undefined);
+        expect(macOSLinuxCatBufferCompare(buffer, result)).toBe(true);
+        pty.close();
 
-      const file = Bun.file(pty.fd());
+        done();
+      },
+    });
 
-      async function read() {
-        const stream = file.stream();
-        for await (const chunk of stream) {
-          buffer += Buffer.from(chunk).toString();
-          // TODO: For some reason, Bun's stream will raise the EIO somewhere where we cannot catch
-          // it, and make the test fail no matter how many try / catch blocks we add.
-          break;
-        }
+    const file = Bun.file(pty.fd());
+
+    async function read() {
+      const stream = file.stream();
+      for await (const chunk of stream) {
+        buffer = chunk;
+        // TODO: For some reason, Bun's stream will raise the EIO somewhere where we cannot catch
+        // it, and make the test fail no matter how many try / catch blocks we add.
+        break;
       }
+    }
 
-      read();
-      Bun.write(pty.fd(), message + EOT + EOT);
-    },
-  );
+    read();
+    Bun.write(pty.fd(), message + EOT + EOT);
+  });
 
   // This test is not supported on Darwin at all.
   (os.type() !== 'Darwin' ? test : test.skip)(
