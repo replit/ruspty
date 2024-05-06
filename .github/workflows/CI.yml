@@ -132,7 +132,7 @@ jobs:
         run: ls -R .
         shell: bash
       - name: Test bindings
-        run: bun test
+        run: bun test:darwin
 
   test-linux-binding:
     name: Test on ${{ matrix.settings.target }}
@@ -165,7 +165,7 @@ jobs:
         run: ls -R .
         shell: bash
       - name: Test bindings
-        run: docker run --rm -v $(pwd):/build -w /build oven/bun:1.1.6 bun test
+        run: docker run --rm -v $(pwd):/build -w /build oven/bun:1.1.6 bun test:linux
 
   publish:
     name: Publish

@@ -35,6 +35,7 @@
     "build:debug": "napi build --platform",
     "prepublishOnly": "napi prepublish -t npm",
     "test:linux": "bun test tests/linux.test.ts",
+    "test:darwin": "bun test tests/darwin.test.ts",
     "universal": "napi universal",
     "version": "napi version",
     "release": "npm publish --access public",
