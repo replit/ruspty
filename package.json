@@ -6,7 +6,7 @@
   "author": "Szymon Kaliski <hi@szymonkaliski.com>",
   "repository": {
     "type": "git",
-    "url": "https://github.com/replit/ruspty.git"
+    "url": "git+https://github.com/replit/ruspty.git"
   },
   "homepage": "https://github.com/replit/ruspty#readme",
   "bugs": {
