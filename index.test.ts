@@ -24,6 +24,8 @@ function macOSLinuxCatBufferCompare(
   return a1 === a2;
 }
 
+const testSkipOnDarwin = os.type() === 'Darwin' ? test.skip : test;
+
 // These two functions ensure that there are no extra open file descriptors after each test
 // finishes. Only works on Linux.
 if (os.type() !== 'Darwin') {
@@ -105,7 +107,7 @@ describe('PTY', () => {
     });
   });
 
-  test('can be written to', (done) => {
+  testSkipOnDarwin('can be written to', (done) => {
     // The message should end in newline so that the EOT can signal that the input has ended and not
     // just the line.
     const message = 'hello cat\n';
@@ -152,7 +154,7 @@ describe('PTY', () => {
     });
   });
 
-  test('can be resized', (done) => {
+  testSkipOnDarwin('can be resized', (done) => {
     const pty = new Pty({
       command: '/bin/sh',
       size: { rows: 24, cols: 80 },
@@ -199,7 +201,7 @@ describe('PTY', () => {
     });
   });
 
-  test('respects working directory', (done) => {
+  testSkipOnDarwin('respects working directory', (done) => {
     let buffer = '';
 
     const pty = new Pty({
@@ -227,7 +229,7 @@ describe('PTY', () => {
     });
   });
 
-  test('respects env', (done) => {
+  testSkipOnDarwin('respects env', (done) => {
     const message = 'hello from env';
     let buffer: Buffer | undefined;
 
@@ -301,29 +303,26 @@ describe('PTY', () => {
   });
 
   // This test is not supported on Darwin at all.
-  (os.type() !== 'Darwin' ? test : test.skip)(
-    'works with data callback',
-    (done) => {
-      const message = 'hello bun\n';
-      let buffer = '';
+  testSkipOnDarwin('works with data callback', (done) => {
+    const message = 'hello bun\n';
+    let buffer = '';
 
-      const pty = new Pty({
-        command: '/bin/cat',
-        onExit: () => {
-          expect(buffer).toBe('hello bun\r\nhello bun\r\n');
-          pty.close();
+    const pty = new Pty({
+      command: '/bin/cat',
+      onExit: () => {
+        expect(buffer).toBe('hello bun\r\nhello bun\r\n');
+        pty.close();
 
-          done();
-        },
-        onData: (err, chunk) => {
-          expect(err).toBeNull();
-          buffer += chunk.toString();
-        },
-      });
+        done();
+      },
+      onData: (err, chunk) => {
+        expect(err).toBeNull();
+        buffer += chunk.toString();
+      },
+    });
 
-      Bun.write(pty.fd(), message + EOT + EOT);
-    },
-  );
+    Bun.write(pty.fd(), message + EOT + EOT);
+  });
 
   test("doesn't break when executing non-existing binary", (done) => {
     try {
