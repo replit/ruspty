@@ -202,7 +202,7 @@ describe('PTY', () => {
     });
   });
 
-  test('works with Bun.read & Bun.write', (done) => {
+  test('works with Bun.file & Bun.write', (done) => {
     const message = 'hello bun\n';
     let buffer = '';
     const result = 'hello bun\r\nhello bun\r\n';
