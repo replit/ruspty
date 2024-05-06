@@ -9,6 +9,7 @@
     in
     pkgs.mkShell {
       buildInputs = with pkgs; [
+        nodejs_20
         bun
         cargo
         libiconv
