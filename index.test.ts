@@ -87,7 +87,6 @@ describe('PTY', () => {
       if (err.code && err.code.indexOf('EIO') !== -1) {
         return;
       }
-      console.log('err', { err });
       throw err;
     });
   });
