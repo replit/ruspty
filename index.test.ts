@@ -58,8 +58,6 @@ if (os.type() !== 'Darwin') {
 }
 
 describe('PTY', () => {
-  const CWD = process.cwd();
-
   test('spawns and exits', (done) => {
     const message = 'hello from a pty';
     let buffer = '';
@@ -201,14 +199,16 @@ describe('PTY', () => {
   });
 
   test('respects working directory', (done) => {
+    const cwd = process.cwd();
     let buffer = '';
 
     const pty = new Pty({
       command: '/bin/pwd',
+      dir: cwd,
       onExit: (err, exitCode) => {
         expect(err).toBeNull();
         expect(exitCode).toBe(0);
-        expect(buffer).toBe(`${CWD}\r\n`);
+        expect(buffer).toBe(`${cwd}\r\n`);
         pty.close();
 
         done();
