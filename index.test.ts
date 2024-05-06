@@ -64,13 +64,10 @@ describe('PTY', () => {
     const message = 'hello from a pty';
     let buffer = '';
 
-    const pty = new Pty(
-      '/bin/echo',
-      [message],
-      {},
-      CWD,
-      { rows: 24, cols: 80 },
-      (err, exitCode) => {
+    const pty = new Pty({
+      command: '/bin/echo',
+      args: [message],
+      onExit: (err, exitCode) => {
         expect(err).toBeNull();
         expect(exitCode).toBe(0);
         expect(buffer).toBe(message + '\r\n');
@@ -78,7 +75,7 @@ describe('PTY', () => {
 
         done();
       },
-    );
+    });
 
     const readStreamFd = pty.fd();
     const readStream = fs.createReadStream('', { fd: readStreamFd });
@@ -96,20 +93,17 @@ describe('PTY', () => {
   });
 
   test('captures an exit code', (done) => {
-    let pty = new Pty(
-      '/bin/sh',
-      ['-c', 'exit 17'],
-      {},
-      CWD,
-      { rows: 24, cols: 80 },
-      (err, exitCode) => {
+    const pty = new Pty({
+      command: '/bin/sh',
+      args: ['-c', 'exit 17'],
+      onExit: (err, exitCode) => {
         expect(err).toBeNull();
         expect(exitCode).toBe(17);
         pty.close();
 
         done();
       },
-    );
+    });
   });
 
   test('can be written to', (done) => {
@@ -123,13 +117,16 @@ describe('PTY', () => {
       32, 99, 97, 116, 13, 10,
     ]);
 
-    const pty = new Pty('/bin/cat', [], {}, CWD, { rows: 24, cols: 80 }, () => {
-      // We have local echo enabled, so we'll read the message twice.
-      assert(buffer);
-      expect(macOSLinuxCatBufferCompare(buffer, result)).toBe(true);
-      pty.close();
+    const pty = new Pty({
+      command: '/bin/cat',
+      onExit: () => {
+        // We have local echo enabled, so we'll read the message twice.
+        assert(buffer);
+        expect(macOSLinuxCatBufferCompare(buffer, result)).toBe(true);
+        pty.close();
 
-      done();
+        done();
+      },
     });
 
     const readStream = fs.createReadStream('', { fd: pty.fd() });
@@ -157,10 +154,14 @@ describe('PTY', () => {
   });
 
   test('can be resized', (done) => {
-    const pty = new Pty('/bin/sh', [], {}, CWD, { rows: 24, cols: 80 }, () => {
-      pty.close();
+    const pty = new Pty({
+      command: '/bin/sh',
+      size: { rows: 24, cols: 80 },
+      onExit: () => {
+        pty.close();
 
-      done();
+        done();
+      },
     });
 
     const readStream = fs.createReadStream('', { fd: pty.fd() });
@@ -202,13 +203,9 @@ describe('PTY', () => {
   test('respects working directory', (done) => {
     let buffer = '';
 
-    const pty = new Pty(
-      '/bin/pwd',
-      [],
-      {},
-      CWD,
-      { rows: 24, cols: 80 },
-      (err, exitCode) => {
+    const pty = new Pty({
+      command: '/bin/pwd',
+      onExit: (err, exitCode) => {
         expect(err).toBeNull();
         expect(exitCode).toBe(0);
         expect(buffer).toBe(`${CWD}\r\n`);
@@ -216,7 +213,7 @@ describe('PTY', () => {
 
         done();
       },
-    );
+    });
 
     const readStream = fs.createReadStream('', { fd: pty.fd() });
 
@@ -235,15 +232,13 @@ describe('PTY', () => {
     const message = 'hello from env';
     let buffer: Buffer | undefined;
 
-    const pty = new Pty(
-      '/bin/sh',
-      ['-c', 'echo $ENV_VARIABLE && exit'],
-      {
+    const pty = new Pty({
+      command: '/bin/sh',
+      args: ['-c', 'echo $ENV_VARIABLE && exit'],
+      envs: {
         ENV_VARIABLE: message,
       },
-      CWD,
-      { rows: 24, cols: 80 },
-      (err, exitCode) => {
+      onExit: (err, exitCode) => {
         expect(err).toBeNull();
         expect(exitCode).toBe(0);
         assert(buffer);
@@ -252,7 +247,7 @@ describe('PTY', () => {
 
         done();
       },
-    );
+    });
 
     const readStream = fs.createReadStream('', { fd: pty.fd() });
 
@@ -277,14 +272,17 @@ describe('PTY', () => {
       111, 32, 98, 117, 110, 13, 10,
     ]);
 
-    const pty = new Pty('/bin/cat', [], {}, CWD, { rows: 24, cols: 80 }, () => {
-      // We have local echo enabled, so we'll read the message twice. Furthermore, the newline
-      // is converted to `\r\n` in this method.
-      assert(buffer !== undefined);
-      expect(macOSLinuxCatBufferCompare(buffer, result)).toBe(true);
-      pty.close();
+    const pty = new Pty({
+      command: '/bin/cat',
+      onExit: () => {
+        // We have local echo enabled, so we'll read the message twice. Furthermore, the newline
+        // is converted to `\r\n` in this method.
+        assert(buffer !== undefined);
+        expect(macOSLinuxCatBufferCompare(buffer, result)).toBe(true);
+        pty.close();
 
-      done();
+        done();
+      },
     });
 
     const file = Bun.file(pty.fd());
@@ -305,14 +303,10 @@ describe('PTY', () => {
 
   test("doesn't break when executing non-existing binary", (done) => {
     try {
-      new Pty(
-        '/bin/this-does-not-exist',
-        [],
-        {},
-        CWD,
-        { rows: 24, cols: 80 },
-        () => {},
-      );
+      new Pty({
+        command: '/bin/this-does-not-exist',
+        onExit: () => {},
+      });
     } catch (e) {
       expect(e.message).toContain('No such file or directory');
 
