@@ -26,23 +26,31 @@ export interface Size {
  * This is the recommended usage:
  *
  * ```
- * const { Pty } = require('replit-ruspy');
- * const fs = require('node:fs');
+ * const { Pty } = require('@replit/ruspy');
+ * const fs = require('fs');
  *
- * const pty = new Pty('sh', [], ENV, CWD, { rows: 24, cols: 80 }, (...result) => {
- *   pty.close();
- *   // TODO: Handle process exit.
+ * const pty = new Pty({
+ *   command: 'sh',
+ *   args: [],
+ *   envs: ENV,
+ *   dir: CWD,
+ *   size: { rows: 24, cols: 80 },
+ *   onExit: (...result) => {
+ *     pty.close();
+ *     // TODO: Handle process exit.
+ *   },
+ *   onData: (err, data) => {
+ *     // NOTE: Optional arguments supported only on linux, workaround for Bun v1.1.7 fd bugs.
+ *   }
  * });
  *
  * const read = new fs.createReadStream('', {
  *   fd: pty.fd(),
  *   start: 0,
  *   highWaterMark: 16 * 1024,
- *   autoClose: true,
  * });
  * const write = new fs.createWriteStream('', {
  *   fd: pty.fd(),
- *   autoClose: true,
  * });
  *
  * read.on('data', (chunk) => {
@@ -63,9 +71,6 @@ export interface Size {
  *   // TODO: Handle the error.
  * });
  * ```
- *
- * The last parameter (a callback that gets stdin chunks) is optional and is only there for
- * compatibility with bun 1.1.7.
  */
 export class Pty {
   /** The pid of the forked process. */
