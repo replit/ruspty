@@ -25,8 +25,9 @@
   "license": "MIT",
   "devDependencies": {
     "@napi-rs/cli": "^2.18.2",
-    "@types/node": "^20.4.1",
     "@types/jest": "^29.5.11",
+    "@types/node": "^20.4.1",
+    "jest": "^29.7.0",
     "prettier": "^3.2.4"
   },
   "scripts": {
@@ -35,11 +36,11 @@
     "build:debug": "napi build --platform",
     "prepublishOnly": "napi prepublish -t npm",
     "test:linux": "bun test tests/linux.test.ts",
-    "test:darwin": "bun test tests/darwin.test.ts",
+    "test:darwin": "npx jest tests/darwin.test.js",
     "universal": "napi universal",
     "version": "napi version",
     "release": "npm publish --access public",
-    "format": "npx prettier *.ts --write"
+    "format": "npx prettier *.ts,*.js --write"
   },
   "optionalDependencies": {
     "@replit/ruspty-darwin-x64": "1.0.0-alpha.1",

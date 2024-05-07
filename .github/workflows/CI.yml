@@ -132,7 +132,7 @@ jobs:
         run: ls -R .
         shell: bash
       - name: Test bindings
-        run: bun test:darwin
+        run: npm run test:darwin
 
   test-linux-binding:
     name: Test on ${{ matrix.settings.target }}
