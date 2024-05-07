@@ -82,12 +82,12 @@ describe('PTY', () => {
     const message = 'hello cat\n';
     let buffer = '';
 
+    // We have local echo enabled, so we'll read the message twice.
     const result = 'hello cat\r\nhello cat\r\n';
 
     const pty = new Pty({
       command: 'cat',
       onExit: () => {
-        // We have local echo enabled, so we'll read the message twice.
         expect(buffer).toBe(result);
 
         pty.close();
