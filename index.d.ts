@@ -39,18 +39,17 @@ export interface Size {
  *     pty.close();
  *     // TODO: Handle process exit.
  *   },
- *   onData: (err, data) => {
- *     // NOTE: Optional arguments supported only on linux, workaround for Bun v1.1.7 fd bugs.
- *   }
  * });
  *
  * const read = new fs.createReadStream('', {
  *   fd: pty.fd(),
  *   start: 0,
  *   highWaterMark: 16 * 1024,
+ *   autoClose: true,
  * });
  * const write = new fs.createWriteStream('', {
  *   fd: pty.fd(),
+ *   autoClose: true,
  * });
  *
  * read.on('data', (chunk) => {
