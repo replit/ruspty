@@ -128,9 +128,6 @@ jobs:
         with:
           name: bindings-${{ matrix.settings.target }}
           path: .
-      - name: List packages
-        run: ls -R .
-        shell: bash
       - name: Test nodejs bindings
         run: npm run test:darwin:node
 
@@ -161,11 +158,8 @@ jobs:
         with:
           name: bindings-${{ matrix.settings.target }}
           path: .
-      - name: List packages
-        run: ls -R .
-        shell: bash
       - name: Test nodejs bindings
-        run: npm run test:linux:node:ci
+        run: docker run --rm -v $(pwd):/build -w /build npm run test:linux:node:ci
       - name: Test bun bindings
         run: docker run --rm -v $(pwd):/build -w /build oven/bun:1.1.6 bun test:linux:bun
 
@@ -193,9 +187,6 @@ jobs:
           path: artifacts
       - name: Move artifacts
         run: bun run artifacts
-      - name: List packages
-        run: ls -R ./npm
-        shell: bash
       - name: Publish
         run: |
           npm config set provenance true
