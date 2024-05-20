@@ -279,6 +279,7 @@ impl Pty {
     };
 
     let mut cmd = Command::new(opts.command);
+
     if let Some(args) = opts.args {
       cmd.args(args);
     }
@@ -303,6 +304,8 @@ impl Pty {
     cmd.stderr(Stdio::from(user_fd.try_clone()?));
     cmd.stdout(Stdio::from(user_fd.try_clone()?));
 
+    // We want to always start with clear env
+    cmd.env_clear();
     if let Some(envs) = opts.envs {
       cmd.envs(envs);
     }
