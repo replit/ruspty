@@ -164,8 +164,10 @@ jobs:
       - name: List packages
         run: ls -R .
         shell: bash
-      - name: Test bindings
-        run: docker run --rm -v $(pwd):/build -w /build oven/bun:1.1.6 bun test:linux
+      - name: Test nodejs bindings
+        run: docker run --rm -v $(pwd):/build -w /build oven/bun:1.1.6 bun test:linux:node:ci
+      - name: Test bun bindings
+        run: docker run --rm -v $(pwd):/build -w /build oven/bun:1.1.6 bun test:linux:bun
 
   publish:
     name: Publish

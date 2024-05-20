@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 
 const EOT = '\x04';
 const procSelfFd = '/proc/self/fd/';
-const previousFDs: Record<string, string> = {};
+const previousFDs = {};
 
 // These two functions ensure that there are no extra open file descriptors after each test
 // finishes. Only works on Linux.
@@ -16,7 +16,7 @@ beforeEach(async () => {
   for (const filename of await readdir(procSelfFd)) {
     try {
       previousFDs[filename] = await readlink(procSelfFd + filename);
-    } catch (err: any) {
+    } catch (err) {
       if (err.code === 'ENOENT') {
         continue;
       }
@@ -33,7 +33,7 @@ afterEach(async () => {
         continue;
       }
       expect(previousFDs).toHaveProperty(filename, linkTarget);
-    } catch (err: any) {
+    } catch (err) {
       if (err.code === 'ENOENT') {
         continue;
       }
@@ -44,7 +44,7 @@ afterEach(async () => {
 
 describe('PTY', () => {
   test('spawns and exits', () => {
-    return new Promise<void>((resolve) => {
+    return new Promise((resolve) => {
       const message = 'hello from a pty';
 
       const pty = new Pty({
@@ -66,7 +66,7 @@ describe('PTY', () => {
   });
 
   test('captures an exit code', () => {
-    return new Promise<void>((resolve) => {
+    return new Promise((resolve) => {
       const pty = new Pty({
         command: 'sh',
         args: ['-c', 'exit 17'],
@@ -82,7 +82,7 @@ describe('PTY', () => {
   });
 
   test('can be written to', () => {
-    return new Promise<void>((resolve) => {
+    return new Promise((resolve) => {
       // The message should end in newline so that the EOT can signal that the input has ended and not
       // just the line.
       const message = 'hello cat\n';
@@ -105,7 +105,7 @@ describe('PTY', () => {
       const writeStream = fs.createWriteStream('', { fd: pty.fd() });
       const readStream = fs.createReadStream('', { fd: pty.fd() });
 
-      readStream.on('error', (err: any) => {
+      readStream.on('error', (err) => {
         if (err.code && err.code.indexOf('EIO') !== -1) {
           return;
         }
@@ -117,7 +117,7 @@ describe('PTY', () => {
 
       writeStream.write(message);
       writeStream.end(EOT);
-      writeStream.on('error', (err: any) => {
+      writeStream.on('error', (err) => {
         if (err.code && err.code.indexOf('EIO') !== -1) {
           return;
         }
@@ -127,7 +127,7 @@ describe('PTY', () => {
   });
 
   test('can be resized', () => {
-    return new Promise<void>((resolve) => {
+    return new Promise((resolve) => {
       let buffer = '';
 
       const pty = new Pty({
@@ -144,7 +144,7 @@ describe('PTY', () => {
       const writeStream = fs.createWriteStream('', { fd: pty.fd() });
       const readStream = fs.createReadStream('', { fd: pty.fd() });
 
-      readStream.on('error', (err: any) => {
+      readStream.on('error', (err) => {
         if (err.code && err.code.indexOf('EIO') !== -1) {
           return;
         }
@@ -167,7 +167,7 @@ describe('PTY', () => {
       });
 
       writeStream.write("stty size; echo 'done1'\n");
-      writeStream.on('error', (err: any) => {
+      writeStream.on('error', (err) => {
         if (err.code && err.code.indexOf('EIO') !== -1) {
           return;
         }
@@ -177,7 +177,7 @@ describe('PTY', () => {
   });
 
   test('respects working directory', () => {
-    return new Promise<void>((resolve) => {
+    return new Promise((resolve) => {
       const cwd = process.cwd();
       let buffer = '';
 
@@ -196,7 +196,7 @@ describe('PTY', () => {
 
       const readStream = fs.createReadStream('', { fd: pty.fd() });
 
-      readStream.on('error', (err: any) => {
+      readStream.on('error', (err) => {
         if (err.code && err.code.indexOf('EIO') !== -1) {
           return;
         }
@@ -209,7 +209,7 @@ describe('PTY', () => {
   });
 
   test('respects env', () => {
-    return new Promise<void>((resolve) => {
+    return new Promise((resolve) => {
       const message = 'hello from env';
       let buffer = '';
 
@@ -233,7 +233,7 @@ describe('PTY', () => {
 
       const readStream = fs.createReadStream('', { fd: pty.fd() });
 
-      readStream.on('error', (err: any) => {
+      readStream.on('error', (err) => {
         if (err.code && err.code.indexOf('EIO') !== -1) {
           return;
         }
@@ -246,7 +246,7 @@ describe('PTY', () => {
   });
 
   test('no extra stuff ends up in env', () => {
-    return new Promise<void>((resolve) => {
+    return new Promise((resolve) => {
       let buffer = '';
 
       const pty = new Pty({
@@ -273,7 +273,7 @@ describe('PTY', () => {
 
       const readStream = fs.createReadStream('', { fd: pty.fd() });
 
-      readStream.on('error', (err: any) => {
+      readStream.on('error', (err) => {
         if (err.code && err.code.indexOf('EIO') !== -1) {
           return;
         }
@@ -286,7 +286,7 @@ describe('PTY', () => {
   });
 
   test("doesn't break when executing non-existing binary", () => {
-    return new Promise<void>((resolve) => {
+    return new Promise((resolve) => {
       try {
         new Pty({
           command: '/bin/this-does-not-exist',
