@@ -129,7 +129,7 @@ jobs:
           name: bindings-${{ matrix.settings.target }}
           path: .
       - name: Test nodejs bindings
-        run: npm run test:darwin:node
+        run: npm run test:darwin:node:ci
 
   test-linux-binding:
     name: Test on ${{ matrix.settings.target }}
@@ -159,7 +159,7 @@ jobs:
           name: bindings-${{ matrix.settings.target }}
           path: .
       - name: Test nodejs bindings
-        run: docker run --rm -v $(pwd):/build -w /build npm run test:linux:node:ci
+        run: docker run --rm -v $(pwd):/build -w /build oven/bun:1.1.6 npm run test:linux:node:ci
       - name: Test bun bindings
         run: docker run --rm -v $(pwd):/build -w /build oven/bun:1.1.6 bun test:linux:bun
 

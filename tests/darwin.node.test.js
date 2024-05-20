@@ -1,5 +1,6 @@
 const { Pty } = require('../index');
 const fs = require('fs');
+import { describe, expect, test } from 'vitest';
 
 const EOT = '\x04';
 
