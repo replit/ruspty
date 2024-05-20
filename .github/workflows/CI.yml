@@ -131,8 +131,8 @@ jobs:
       - name: List packages
         run: ls -R .
         shell: bash
-      - name: Test bindings
-        run: npm run test:darwin
+      - name: Test nodejs bindings
+        run: npm run test:darwin:node
 
   test-linux-binding:
     name: Test on ${{ matrix.settings.target }}
@@ -165,7 +165,7 @@ jobs:
         run: ls -R .
         shell: bash
       - name: Test nodejs bindings
-        run: docker run --rm -v $(pwd):/build -w /build oven/bun:1.1.6 bun test:linux:node:ci
+        run: npm run test:linux:node:ci
       - name: Test bun bindings
         run: docker run --rm -v $(pwd):/build -w /build oven/bun:1.1.6 bun test:linux:bun
 

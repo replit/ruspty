@@ -36,7 +36,7 @@
     "test:linux:bun": "bun test tests/linux.bun.test.ts",
     "test:linux:node": "npx vitest tests/linux.node.test.js",
     "test:linux:node:ci": "npx vitest run tests/linux.node.test.js",
-    "test:darwin": "npx vitest tests/darwin.test.js",
+    "test:darwin:node": "npx vitest tests/darwin.test.js",
     "universal": "napi universal",
     "version": "napi version",
     "release": "npm publish --access public",
