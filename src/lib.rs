@@ -304,7 +304,7 @@ impl Pty {
     cmd.stdout(Stdio::from(user_fd.try_clone()?));
 
     // We want the env to be clean, we can always pass in `process.env` if we want to.
-    cmd.clean_env();
+    cmd.env_clear();
     if let Some(envs) = opts.envs {
       cmd.envs(envs);
     }
