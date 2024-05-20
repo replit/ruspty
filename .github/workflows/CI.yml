@@ -159,7 +159,7 @@ jobs:
           name: bindings-${{ matrix.settings.target }}
           path: .
       - name: Test nodejs bindings
-        run: docker run --rm -v $(pwd):/build -w /build oven/bun:1.1.6 bun test:linux:node:ci
+        run: docker run --rm -v $(pwd):/build -w /build node:20-slim npm run test:linux:node:ci
       - name: Test bun bindings
         run: docker run --rm -v $(pwd):/build -w /build oven/bun:1.1.6 bun test:linux:bun
 
@@ -170,7 +170,7 @@ jobs:
       - test-macos-binding
       - test-linux-binding
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4npm run
       - name: Setup Bun
         uses: oven-sh/setup-bun@v1
         with:
