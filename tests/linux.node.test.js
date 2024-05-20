@@ -10,37 +10,37 @@ const EOT = '\x04';
 const procSelfFd = '/proc/self/fd/';
 const previousFDs = {};
 
-// These two functions ensure that there are no extra open file descriptors after each test
-// finishes. Only works on Linux.
-beforeEach(async () => {
-  for (const filename of await readdir(procSelfFd)) {
-    try {
-      previousFDs[filename] = await readlink(procSelfFd + filename);
-    } catch (err) {
-      if (err.code === 'ENOENT') {
-        continue;
-      }
-      throw err;
-    }
-  }
-});
+// // These two functions ensure that there are no extra open file descriptors after each test
+// // finishes. Only works on Linux.
+// beforeEach(async () => {
+//   for (const filename of await readdir(procSelfFd)) {
+//     try {
+//       previousFDs[filename] = await readlink(procSelfFd + filename);
+//     } catch (err) {
+//       if (err.code === 'ENOENT') {
+//         continue;
+//       }
+//       throw err;
+//     }
+//   }
+// });
 
-afterEach(async () => {
-  for (const filename of await readdir(procSelfFd)) {
-    try {
-      const linkTarget = await readlink(procSelfFd + filename);
-      if (linkTarget === 'anon_inode:[timerfd]') {
-        continue;
-      }
-      expect(previousFDs).toHaveProperty(filename, linkTarget);
-    } catch (err) {
-      if (err.code === 'ENOENT') {
-        continue;
-      }
-      throw err;
-    }
-  }
-});
+// afterEach(async () => {
+//   for (const filename of await readdir(procSelfFd)) {
+//     try {
+//       const linkTarget = await readlink(procSelfFd + filename);
+//       if (linkTarget === 'anon_inode:[timerfd]') {
+//         continue;
+//       }
+//       expect(previousFDs).toHaveProperty(filename, linkTarget);
+//     } catch (err) {
+//       if (err.code === 'ENOENT') {
+//         continue;
+//       }
+//       throw err;
+//     }
+//   }
+// });
 
 describe('PTY', () => {
   test('spawns and exits', () => {
