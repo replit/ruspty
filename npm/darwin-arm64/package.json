@@ -1,0 +1,18 @@
+{
+  "name": "@replit/ruspty-darwin-arm64",
+  "version": "2.2.0",
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "main": "ruspty.darwin-arm64.node",
+  "files": [
+    "ruspty.darwin-arm64.node"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">= 10"
+  }
+}

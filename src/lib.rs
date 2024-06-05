@@ -3,14 +3,14 @@ use std::io::Error;
 use std::io::ErrorKind;
 use std::os::fd::{AsRawFd, OwnedFd};
 use std::os::unix::process::CommandExt;
-use std::process::{Child, Command, Stdio};
+use std::process::{Command, Stdio};
 use std::thread;
 use std::time::Duration;
 
 use backoff::backoff::Backoff;
 use backoff::ExponentialBackoffBuilder;
 use libc::{self, c_int};
-use napi::bindgen_prelude::{Buffer, JsFunction};
+use napi::bindgen_prelude::JsFunction;
 use napi::threadsafe_function::{ErrorStrategy, ThreadsafeFunction, ThreadsafeFunctionCallMode};
 use napi::Status::GenericFailure;
 use napi::{self, Env};
@@ -91,8 +91,6 @@ struct PtyOptions {
   pub size: Option<Size>,
   #[napi(ts_type = "(err: null | Error, exitCode: number) => void")]
   pub on_exit: JsFunction,
-  #[napi(ts_type = "(err: null | Error, data: Buffer) => void")]
-  pub on_data: Option<JsFunction>,
 }
 
 /// A size struct to pass to resize.
@@ -139,88 +137,6 @@ fn set_nonblocking(fd: c_int) -> Result<(), napi::Error> {
   }
 
   Ok(())
-}
-
-/// Read all the contents from the child's PTY until there is nothing left to read _and_ the child
-/// process has exited.
-#[allow(dead_code)]
-fn controller_read_loop(
-  controller_fd: OwnedFd,
-  child: &Child,
-  ts_on_data: &ThreadsafeFunction<Buffer, ErrorStrategy::CalleeHandled>,
-) -> Result<(), napi::Error> {
-  #[cfg(target_os = "linux")]
-  {
-    // The following code only works on Linux due to the reliance on pidfd.
-    use rustix::process::{pidfd_open, Pid, PidfdFlags};
-
-    let pidfd = pidfd_open(
-      unsafe { Pid::from_raw_unchecked(child.id() as i32) },
-      PidfdFlags::empty(),
-    )
-    .map_err(|err| napi::Error::new(GenericFailure, format!("pidfd_open: {:#?}", err)))?;
-    let mut poll_fds = [
-      PollFd::new(&controller_fd, PollFlags::IN),
-      PollFd::new(&pidfd, PollFlags::IN),
-    ];
-    let mut buf = [0u8; 16 * 1024];
-    loop {
-      for poll_fd in &mut poll_fds[..] {
-        poll_fd.clear_revents();
-      }
-      if let Err(errno) = poll(&mut poll_fds, -1) {
-        if errno == rustix::io::Errno::AGAIN || errno == rustix::io::Errno::INTR {
-          // These two errors are safe to retry.
-          continue;
-        }
-        return Err(napi::Error::new(
-          GenericFailure,
-          format!("OS error when waiting for child read: {:#?}", errno),
-        ));
-      }
-      // Always check the controller FD first to see if it has any events.
-      if poll_fds[0].revents().contains(PollFlags::IN) {
-        match rustix::io::read(&controller_fd, &mut buf) {
-          Ok(n) => {
-            ts_on_data.call(
-              Ok(buf[..n as usize].into()),
-              ThreadsafeFunctionCallMode::Blocking,
-            );
-          }
-          Err(errno) => {
-            if errno == rustix::io::Errno::AGAIN || errno == rustix::io::Errno::INTR {
-              // These two errors are safe to retry.
-              continue;
-            }
-            if errno == rustix::io::Errno::IO {
-              // This error happens when the child closes. We can simply break the loop.
-              return Ok(());
-            }
-            return Err(napi::Error::new(
-              GenericFailure,
-              format!("OS error when reading from child: {:#?}", errno,),
-            ));
-          }
-        }
-        // If there was data, keep trying to read this FD.
-        continue;
-      }
-
-      // Now that we're sure that the controller FD doesn't have any events, we have
-      // successfully drained the child's output, so we can now check if the child has
-      // exited.
-      if poll_fds[1].revents().contains(PollFlags::IN) {
-        return Ok(());
-      }
-    }
-  }
-  #[cfg(not(target_os = "linux"))]
-  {
-    Err(napi::Error::new(
-      GenericFailure,
-      "the data callback is only implemented in Linux",
-    ))
-  }
 }
 
 /// Wait until the controller PTY doesn't have any more data left to read.
@@ -373,27 +289,10 @@ impl Pty {
       let ts_on_exit: ThreadsafeFunction<i32, ErrorStrategy::CalleeHandled> = opts
         .on_exit
         .create_threadsafe_function(0, |ctx| ctx.env.create_int32(ctx.value).map(|v| vec![v]))?;
-      let ts_on_data: Option<ThreadsafeFunction<Buffer, ErrorStrategy::CalleeHandled>> = opts
-        .on_data
-        .map(|on_data| {
-          Ok::<ThreadsafeFunction<Buffer, ErrorStrategy::CalleeHandled>, napi::Error>(
-            on_data.create_threadsafe_function(0, |ctx| Ok(vec![ctx.value]))?,
-          )
-        })
-        .transpose()?;
       thread::spawn(move || {
-        let controller_fd = if let Some(ts_on_data) = ts_on_data {
-          // If the on_data callback was passed, we'll consume the controller_fd as part of the
-          // poll loop.
-          if let Err(err) = controller_read_loop(controller_fd, &child, &ts_on_data) {
-            ts_on_data.call(Err(err), ThreadsafeFunctionCallMode::Blocking);
-          }
-          None
-        } else {
-          // If `on_data` was not passed, we'll wait for the process to go away and then keep
-          // polling the FD until all data has been read.
-          Some(controller_fd)
-        };
+        // wait for the process to go away and then keep
+        // polling the FD until all data has been read.
+        let controller_fd = Some(controller_fd);
         let wait_result = child.wait();
         if let Some(controller_fd) = controller_fd {
           // If `on_data` was not passed, we still have one end of the PTY. We'll keep polling

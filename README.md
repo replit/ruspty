@@ -1,17 +1,14 @@
-# `@replit/ruspty` - PTY for Bun (and Node) through Rust FFI
+# `@replit/ruspty` - PTY for JavaScript through Rust FFI
 
 Running:
 
-- `bun install`
-- `bun run build` / `bun run build:debug`
-- `bun test:linux` on Linux
-- `npm run test:darwin` on macOS
+- `npm install`
+- `npm run build` / `npm run build:debug`
+- `npm run test`
 
-The code mainly targets Bun on Linux.
+The code mainly targets Node on Linux.
 
 The biggest difference from existing PTY libraries is that this one works with Bun, and doesn't cross the FFI bridge for every input/output instead requiring the consumer to deal with the `fd` of the PTY.
-
-**WARNING**: as of 2024-05-06 there's a [bug in Bun](https://github.com/oven-sh/bun/issues/9907) which prevents us from using `fd` with Bun, and a temporary workaround with `onData` handler was introduced in `v2.0.1`. Check out Linux tests for usage.
 
 ## Publishing
 

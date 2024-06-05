@@ -1,7 +1,16 @@
-const { Pty } = require('../index');
-const fs = require('fs');
+import { Pty } from '../index';
+import assert from 'assert';
+import fs from 'fs';
 
 const EOT = '\x04';
+
+function createReadStreamFromPty(pty: Pty) {
+  return fs.createReadStream('', { fd: pty.fd(), start: 0, autoClose: true });
+}
+
+function createWriteStreamToPty(pty: Pty) {
+  return fs.createWriteStream('', { fd: pty.fd(), start: 0, autoClose: true });
+}
 
 describe('PTY', () => {
   test('spawns and exits', (done) => {
@@ -21,13 +30,9 @@ describe('PTY', () => {
       },
     });
 
-    setImmediate(() => {
-      const fd = pty.fd();
-      const readStream = fs.createReadStream('', { fd });
-
-      readStream.on('data', (chunk) => {
-        buffer = chunk.toString();
-      });
+    const readStream = createReadStreamFromPty(pty);
+    readStream.on('data', (chunk) => {
+      buffer = chunk.toString();
     });
   });
 
@@ -66,29 +71,23 @@ describe('PTY', () => {
       },
     });
 
-    setImmediate(() => {
-      const writeFd = pty.fd();
-      const writeStream = fs.createWriteStream('', { fd: writeFd });
+    const writeStream = createWriteStreamToPty(pty);
+    const readStream = createReadStreamFromPty(pty);
 
-      const readFd = pty.fd();
-      const readStream = fs.createReadStream('', { fd: readFd });
+    readStream.on('data', (data) => {
+      buffer += data.toString();
+    });
 
-      readStream.on('data', (data) => {
-        buffer += data.toString();
-      });
-
-      writeStream.write(message);
-      writeStream.end(EOT);
-      writeStream.on('error', (err) => {
-        if (err.code && err.code.indexOf('EIO') !== -1) {
-          return;
-        }
-        throw err;
-      });
+    writeStream.write(message);
+    writeStream.end(EOT);
+    writeStream.on('error', (err: any) => {
+      if (err.code && err.code.indexOf('EIO') !== -1) {
+        return;
+      }
+      throw err;
     });
   });
 
-  // TODO: fix this test on macOS
   test.skip('can be resized', (done) => {
     let buffer = '';
 
@@ -102,44 +101,34 @@ describe('PTY', () => {
       },
     });
 
-    setImmediate(() => {
-      const writeFd = pty.fd();
-      const writeStream = fs.createWriteStream('', { fd: writeFd });
+    const writeStream = createWriteStreamToPty(pty);
+    const readStream = createReadStreamFromPty(pty);
 
-      const readFd = pty.fd();
-      const readStream = fs.createReadStream('', { fd: readFd });
+    readStream.on('data', (data) => {
+      buffer += data.toString();
 
-      readStream.on('data', (data) => {
-        buffer += data.toString();
+      if (buffer.includes('done1\r\n')) {
+        expect(buffer).toContain('24 80');
+        pty.resize({ rows: 60, cols: 100 });
+        buffer = '';
 
-        console.log('buffer');
-        console.log(buffer);
-        console.log('-----');
+        writeStream.write("stty size; echo 'done2'\n");
+      }
 
-        if (buffer.includes('done1\r\n')) {
-          expect(buffer).toContain('24 80');
-          pty.resize({ rows: 60, cols: 100 });
-          buffer = '';
+      if (buffer.includes('done2\r\n')) {
+        expect(buffer).toContain('60 100');
+      }
+    });
 
-          writeStream.write("stty size; echo 'done2'\n");
-        }
-
-        if (buffer.includes('done2\r\n')) {
-          expect(buffer).toContain('60 100');
-        }
-      });
-
-      writeStream.write("stty size; echo 'done1'\n");
-      writeStream.on('error', (err) => {
-        if (err.code && err.code.indexOf('EIO') !== -1) {
-          return;
-        }
-        throw err;
-      });
+    writeStream.write("stty size; echo 'done1'\n");
+    writeStream.on('error', (err: NodeJS.ErrnoException) => {
+      if (err.code && err.code.indexOf('EIO') !== -1) {
+        return;
+      }
+      throw err;
     });
   });
 
-  // TODO: fix this test on macOS
   test.skip('respects working directory', (done) => {
     const cwd = process.cwd();
     let buffer = '';
@@ -157,20 +146,15 @@ describe('PTY', () => {
       },
     });
 
-    setImmediate(() => {
-      const readFd = pty.fd();
-      const readStream = fs.createReadStream('', { fd: readFd });
-
-      readStream.on('data', (data) => {
-        buffer += data.toString();
-      });
+    const readStream = createReadStreamFromPty(pty);
+    readStream.on('data', (data) => {
+      buffer += data.toString();
     });
   });
 
-  // TODO: fix this test on macOS
   test.skip('respects env', (done) => {
     const message = 'hello from env';
-    let buffer;
+    let buffer: string;
 
     const pty = new Pty({
       command: '/bin/sh',
@@ -182,20 +166,16 @@ describe('PTY', () => {
         expect(err).toBeNull();
         expect(exitCode).toBe(0);
         assert(buffer);
-        expect(Buffer.compare(buffer, Buffer.from(message + '\r\n'))).toBe(0);
+        expect(Buffer.compare(Buffer.from(buffer), Buffer.from(message + '\r\n'))).toBe(0);
         pty.close();
 
         done();
       },
     });
 
-    setImmediate(() => {
-      const readFd = pty.fd();
-      const readStream = fs.createReadStream('', { fd: readFd });
-
-      readStream.on('data', (data) => {
-        buffer += data.toString();
-      });
+    const readStream = createReadStreamFromPty(pty);
+    readStream.on('data', (data) => {
+      buffer += data.toString();
     });
   });
 
@@ -203,9 +183,9 @@ describe('PTY', () => {
     try {
       new Pty({
         command: '/bin/this-does-not-exist',
-        onExit: () => {},
+        onExit: () => { },
       });
-    } catch (e) {
+    } catch (e: any) {
       expect(e.message).toContain('No such file or directory');
 
       done();
