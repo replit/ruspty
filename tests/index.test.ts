@@ -1,6 +1,7 @@
 import { Pty } from '../index';
 import assert from 'assert';
 import fs from 'fs';
+import { describe, test, expect } from 'vitest';
 
 const EOT = '\x04';
 
@@ -9,11 +10,11 @@ function createReadStreamFromPty(pty: Pty) {
 }
 
 function createWriteStreamToPty(pty: Pty) {
-  return fs.createWriteStream('', { fd: pty.fd(), start: 0, autoClose: true });
+  return fs.createWriteStream('', { fd: pty.fd(), start: 0 });
 }
 
 describe('PTY', () => {
-  test('spawns and exits', (done) => {
+  test('spawns and exits', () => new Promise<void>((done) => {
     const message = 'hello from a pty';
     let buffer = '';
 
@@ -34,9 +35,9 @@ describe('PTY', () => {
     readStream.on('data', (chunk) => {
       buffer = chunk.toString();
     });
-  });
+  }));
 
-  test('captures an exit code', (done) => {
+  test('captures an exit code', () => new Promise<void>((done) => {
     const pty = new Pty({
       command: '/bin/sh',
       args: ['-c', 'exit 17'],
@@ -48,9 +49,9 @@ describe('PTY', () => {
         done();
       },
     });
-  });
+  }));
 
-  test('can be written to', (done) => {
+  test('can be written to', () => new Promise<void>((done) => {
     // The message should end in newline so that the EOT can signal that the input has ended and not
     // just the line.
     const message = 'hello cat\n';
@@ -86,9 +87,9 @@ describe('PTY', () => {
       }
       throw err;
     });
-  });
+  }));
 
-  test.skip('can be resized', (done) => {
+  test('can be resized', () => new Promise<void>((done) => {
     let buffer = '';
 
     const pty = new Pty({
@@ -127,9 +128,9 @@ describe('PTY', () => {
       }
       throw err;
     });
-  });
+  }));
 
-  test.skip('respects working directory', (done) => {
+  test('respects working directory', () => new Promise<void>((done) => {
     const cwd = process.cwd();
     let buffer = '';
 
@@ -150,9 +151,9 @@ describe('PTY', () => {
     readStream.on('data', (data) => {
       buffer += data.toString();
     });
-  });
+  }));
 
-  test.skip('respects env', (done) => {
+  test('respects env', () => new Promise<void>((done) => {
     const message = 'hello from env';
     let buffer: string;
 
@@ -177,9 +178,9 @@ describe('PTY', () => {
     readStream.on('data', (data) => {
       buffer += data.toString();
     });
-  });
+  }));
 
-  test("doesn't break when executing non-existing binary", (done) => {
+  test("doesn't break when executing non-existing binary", () => new Promise<void>((done) => {
     try {
       new Pty({
         command: '/bin/this-does-not-exist',
@@ -190,5 +191,5 @@ describe('PTY', () => {
 
       done();
     }
-  });
+  }));
 });

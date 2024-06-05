@@ -28,7 +28,7 @@ extern crate napi_derive;
 /// This is the recommended usage:
 ///
 /// ```
-/// const { Pty } = require('@replit/ruspy');
+/// const { Pty } = require('@replit/ruspty');
 /// const fs = require('fs');
 ///
 /// const pty = new Pty({

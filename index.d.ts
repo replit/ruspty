@@ -11,7 +11,6 @@ export interface PtyOptions {
   dir?: string
   size?: Size
   onExit: (err: null | Error, exitCode: number) => void
-  onData?: (err: null | Error, data: Buffer) => void
 }
 /** A size struct to pass to resize. */
 export interface Size {
@@ -26,7 +25,7 @@ export interface Size {
  * This is the recommended usage:
  *
  * ```
- * const { Pty } = require('@replit/ruspy');
+ * const { Pty } = require('@replit/ruspty');
  * const fs = require('fs');
  *
  * const pty = new Pty({
