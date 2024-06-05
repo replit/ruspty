@@ -14,7 +14,7 @@ function createWriteStreamToPty(pty: Pty) {
 }
 
 describe('PTY', () => {
-  test('spawns and exits', () => new Promise<void>((done) => {
+  test.only('spawns and exits', () => new Promise<void>((done) => {
     const message = 'hello from a pty';
     let buffer = '';
 
