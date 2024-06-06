@@ -78,12 +78,12 @@ jobs:
           run: |-
             set -e &&
             npm run build --target ${{ matrix.settings.target }} &&
-            strip ${{ matrix.settings.target }}/*.node
+            strip -x ${{ matrix.settings.target }}/*.node
       - name: Build
         run: |-
           set -e &&
           npm run build --target ${{ matrix.settings.target }} &&
-          strip ${{ matrix.settings.target }}/*.node
+          strip -x ${{ matrix.settings.target }}/*.node
         if: ${{ !matrix.settings.docker }}
         shell: bash
       - name: Upload artifact
