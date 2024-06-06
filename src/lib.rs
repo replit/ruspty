@@ -276,15 +276,7 @@ impl Pty {
   #[allow(dead_code)]
   pub fn fd(&mut self) -> Result<c_int, napi::Error> {
     if let Some(fd) = &self.controller_fd {
-      let res = unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_DUPFD_CLOEXEC, 3) };
-      if res == -1 {
-        return Err(napi::Error::new(
-          napi::Status::GenericFailure,
-          format!("fcntl F_DUPFD_CLOEXEC failed: {}", Error::last_os_error()),
-        ));
-      }
-
-      Ok(res)
+      Ok(fd.as_raw_fd())
     } else {
       Err(napi::Error::new(
         napi::Status::GenericFailure,

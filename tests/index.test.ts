@@ -33,7 +33,7 @@ function getOpenFds(): FdRecord {
   for (const filename of readdirSync(procSelfFd)) {
     try {
       const linkTarget = readlinkSync(procSelfFd + filename);
-      if (linkTarget === 'anon_inode:[timerfd]') {
+      if (linkTarget === 'anon_inode:[timerfd]' || linkTarget.startsWith("socket:[")) {
         continue;
       }
 
@@ -72,7 +72,7 @@ describe('PTY', () => {
       onExit: async (err, exitCode) => {
         expect(err).toBeNull();
         expect(exitCode).toBe(0);
-        vi.waitFor(() => expect(buffer.trim()).toBe(message));
+        await vi.waitFor(() => expect(buffer.trim()).toBe(message));
         done();
       },
     });
@@ -109,8 +109,8 @@ describe('PTY', () => {
 
     pty = new Pty({
       command: '/bin/cat',
-      onExit: () => {
-        vi.waitFor(() => expect(buffer.trim()).toBe(result.trim()));
+      onExit: async () => {
+        await vi.waitFor(() => expect(buffer.trim()).toBe(result.trim()));
         done();
       },
     });
@@ -169,10 +169,10 @@ describe('PTY', () => {
     pty = new Pty({
       command: '/bin/pwd',
       dir: cwd,
-      onExit: (err, exitCode) => {
+      onExit: async (err, exitCode) => {
         expect(err).toBeNull();
         expect(exitCode).toBe(0);
-        vi.waitFor(() => expect(buffer.trim()).toBe(cwd));
+        await vi.waitFor(() => expect(buffer.trim()).toBe(cwd));
 
         done();
       },
@@ -195,10 +195,10 @@ describe('PTY', () => {
       envs: {
         ENV_VARIABLE: message,
       },
-      onExit: (err, exitCode) => {
+      onExit: async (err, exitCode) => {
         expect(err).toBeNull();
         expect(exitCode).toBe(0);
-        vi.waitFor(() => expect(buffer.trim()).toBe(message));
+        await vi.waitFor(() => expect(buffer.trim()).toBe(message));
 
         done();
       },
@@ -223,4 +223,4 @@ describe('PTY', () => {
       done();
     }
   }));
-}, { repeats: 1 });
+}, { repeats: 15 });
