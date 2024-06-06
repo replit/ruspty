@@ -195,5 +195,4 @@ describe('PTY', () => {
       done();
     }
   }));
-}, { repeats: 2 });
-// });
+}, { repeats: 50 });
