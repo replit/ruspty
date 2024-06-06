@@ -1,6 +1,5 @@
 import { Pty } from '../index';
-import fs from 'fs';
-import { readdir, readlink } from 'fs/promises';
+import fs, { readdirSync, readlinkSync } from 'fs';
 import { describe, test, expect, onTestFinished, vi, beforeEach, afterEach } from 'vitest';
 
 const EOT = '\x04';
@@ -24,60 +23,55 @@ const rejectOnNonEIO = (reject: (reason?: Error) => void) => (err: NodeJS.ErrnoE
   reject(err);
 }
 
+type FdRecord = Record<string, string>;
+function getOpenFds(): FdRecord {
+  const fds: FdRecord = {};
+  if (process.platform !== 'linux') {
+    return fds;
+  }
+
+  for (const filename of readdirSync(procSelfFd)) {
+    try {
+      const linkTarget = readlinkSync(procSelfFd + filename);
+      if (linkTarget === 'anon_inode:[timerfd]') {
+        continue;
+      }
+
+      fds[filename] = linkTarget;
+    } catch (err: any) {
+      if (err.code === 'ENOENT') {
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  return fds;
+}
+
 describe('PTY', () => {
-  const previousFDs: Record<string, string> = {};
-  // These two functions ensure that there are no extra open file descriptors after each test
-  // finishes. Only works on Linux.
-  beforeEach(async () => {
-    if (process.platform !== 'linux') {
-      return;
-    }
+  let pty: Pty;
+  let oldFds: FdRecord;
 
-    for (const filename of await readdir(procSelfFd)) {
-      try {
-        previousFDs[filename] = await readlink(procSelfFd + filename);
-      } catch (err: any) {
-        if (err.code === 'ENOENT') {
-          continue;
-        }
-        throw err;
-      }
-    }
-  });
+  beforeEach(() => {
+    oldFds = getOpenFds();
+  })
 
-  afterEach(async () => {
-    if (process.platform !== 'linux') {
-      return;
-    }
-
-    for (const filename of await readdir(procSelfFd)) {
-      try {
-        const linkTarget = await readlink(procSelfFd + filename);
-        if (linkTarget === 'anon_inode:[timerfd]') {
-          continue;
-        }
-        expect(previousFDs).toHaveProperty(filename, linkTarget);
-      } catch (err: any) {
-        if (err.code === 'ENOENT') {
-          continue;
-        }
-        throw err;
-      }
-    }
-  });
+  afterEach(() => {
+    pty.close();
+    expect(getOpenFds()).toStrictEqual(oldFds);
+  })
 
   test('spawns and exits', () => new Promise<void>((done, reject) => {
     const message = 'hello from a pty';
     let buffer = '';
 
-    const pty = new Pty({
+    pty = new Pty({
       command: '/bin/echo',
       args: [message],
       onExit: async (err, exitCode) => {
-        onTestFinished(() => pty.close());
         expect(err).toBeNull();
         expect(exitCode).toBe(0);
-
         vi.waitFor(() => expect(buffer.trim()).toBe(message));
         done();
       },
@@ -91,14 +85,12 @@ describe('PTY', () => {
   }));
 
   test('captures an exit code', () => new Promise<void>((done) => {
-    const pty = new Pty({
+    pty = new Pty({
       command: '/bin/sh',
       args: ['-c', 'exit 17'],
       onExit: (err, exitCode) => {
-        onTestFinished(() => pty.close());
         expect(err).toBeNull();
         expect(exitCode).toBe(17);
-
         done();
       },
     });
@@ -115,12 +107,10 @@ describe('PTY', () => {
       ? 'hello cat\r\n^D\b\bhello cat\r\n'
       : 'hello cat\r\nhello cat\r\n';
 
-    const pty = new Pty({
+    pty = new Pty({
       command: '/bin/cat',
       onExit: () => {
-        onTestFinished(() => pty.close());
         vi.waitFor(() => expect(buffer.trim()).toBe(result.trim()));
-
         done();
       },
     });
@@ -139,13 +129,10 @@ describe('PTY', () => {
 
   test('can be resized', () => new Promise<void>((done, reject) => {
     let buffer = '';
-    const pty = new Pty({
+    pty = new Pty({
       command: '/bin/sh',
       size: { rows: 24, cols: 80 },
-      onExit: () => {
-        onTestFinished(() => pty.close());
-        done();
-      },
+      onExit: () => done(),
     });
 
     const writeStream = createWriteStreamToPty(pty);
@@ -179,11 +166,10 @@ describe('PTY', () => {
     const cwd = process.cwd();
     let buffer = '';
 
-    const pty = new Pty({
+    pty = new Pty({
       command: '/bin/pwd',
       dir: cwd,
       onExit: (err, exitCode) => {
-        onTestFinished(() => pty.close());
         expect(err).toBeNull();
         expect(exitCode).toBe(0);
         vi.waitFor(() => expect(buffer.trim()).toBe(cwd));
@@ -203,14 +189,13 @@ describe('PTY', () => {
     const message = 'hello from env';
     let buffer = '';
 
-    const pty = new Pty({
+    pty = new Pty({
       command: '/bin/sh',
       args: ['-c', 'echo $ENV_VARIABLE && exit'],
       envs: {
         ENV_VARIABLE: message,
       },
       onExit: (err, exitCode) => {
-        onTestFinished(() => pty.close());
         expect(err).toBeNull();
         expect(exitCode).toBe(0);
         vi.waitFor(() => expect(buffer.trim()).toBe(message));
@@ -228,7 +213,7 @@ describe('PTY', () => {
 
   test("doesn't break when executing non-existing binary", () => new Promise<void>((done) => {
     try {
-      new Pty({
+      pty = new Pty({
         command: '/bin/this-does-not-exist',
         onExit: () => { },
       });
