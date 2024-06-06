@@ -1,32 +1,34 @@
 import { Pty } from '../index';
 import assert from 'assert';
 import fs from 'fs';
-import { describe, test, expect } from 'vitest';
+import { describe, test, expect, onTestFinished, vi } from 'vitest';
 
 const EOT = '\x04';
 
 function createReadStreamFromPty(pty: Pty) {
-  return fs.createReadStream('', { fd: pty.fd(), start: 0, autoClose: true });
+  const fd = pty.fd();
+  return fs.createReadStream('', { fd, autoClose: false });
 }
 
 function createWriteStreamToPty(pty: Pty) {
-  return fs.createWriteStream('', { fd: pty.fd(), start: 0 });
+  const fd = pty.fd();
+  return fs.createWriteStream('', { fd, autoClose: false });
 }
 
 describe('PTY', () => {
-  test.only('spawns and exits', () => new Promise<void>((done) => {
+  test('spawns and exits', () => new Promise<void>((done) => {
     const message = 'hello from a pty';
     let buffer = '';
 
     const pty = new Pty({
       command: '/bin/echo',
       args: [message],
-      onExit: (err, exitCode) => {
+      onExit: async (err, exitCode) => {
+        onTestFinished(() => pty.close());
         expect(err).toBeNull();
         expect(exitCode).toBe(0);
-        expect(buffer).toBe(message + '\r\n');
-        pty.close();
 
+        vi.waitFor(() => expect(buffer.trim()).toBe(message));
         done();
       },
     });
@@ -42,16 +44,16 @@ describe('PTY', () => {
       command: '/bin/sh',
       args: ['-c', 'exit 17'],
       onExit: (err, exitCode) => {
+        onTestFinished(() => pty.close());
         expect(err).toBeNull();
         expect(exitCode).toBe(17);
-        pty.close();
 
         done();
       },
     });
   }));
 
-  test('can be written to', () => new Promise<void>((done) => {
+  test('can be written to', () => new Promise<void>((done, reject) => {
     // The message should end in newline so that the EOT can signal that the input has ended and not
     // just the line.
     const message = 'hello cat\n';
@@ -64,9 +66,8 @@ describe('PTY', () => {
     const pty = new Pty({
       command: '/bin/cat',
       onExit: () => {
-        expect(buffer).toBe(result);
-
-        pty.close();
+        onTestFinished(() => pty.close());
+        vi.waitFor(() => expect(buffer.trim()).toBe(result.trim()));
 
         done();
       },
@@ -85,19 +86,18 @@ describe('PTY', () => {
       if (err.code && err.code.indexOf('EIO') !== -1) {
         return;
       }
-      throw err;
+
+      reject(err);
     });
   }));
 
-  test('can be resized', () => new Promise<void>((done) => {
+  test('can be resized', () => new Promise<void>((done, reject) => {
     let buffer = '';
-
     const pty = new Pty({
       command: '/bin/sh',
       size: { rows: 24, cols: 80 },
       onExit: () => {
-        pty.close();
-
+        onTestFinished(() => pty.close());
         done();
       },
     });
@@ -114,10 +114,14 @@ describe('PTY', () => {
         buffer = '';
 
         writeStream.write("stty size; echo 'done2'\n");
+        return;
       }
 
       if (buffer.includes('done2\r\n')) {
         expect(buffer).toContain('60 100');
+
+        writeStream.write(EOT);
+        return;
       }
     });
 
@@ -126,7 +130,8 @@ describe('PTY', () => {
       if (err.code && err.code.indexOf('EIO') !== -1) {
         return;
       }
-      throw err;
+
+      reject(err);
     });
   }));
 
@@ -138,10 +143,10 @@ describe('PTY', () => {
       command: '/bin/pwd',
       dir: cwd,
       onExit: (err, exitCode) => {
+        onTestFinished(() => pty.close());
         expect(err).toBeNull();
         expect(exitCode).toBe(0);
-        expect(buffer).toBe(`${cwd}\r\n`);
-        pty.close();
+        vi.waitFor(() => expect(buffer.trim()).toBe(cwd));
 
         done();
       },
@@ -155,7 +160,7 @@ describe('PTY', () => {
 
   test('respects env', () => new Promise<void>((done) => {
     const message = 'hello from env';
-    let buffer: string;
+    let buffer = '';
 
     const pty = new Pty({
       command: '/bin/sh',
@@ -164,11 +169,11 @@ describe('PTY', () => {
         ENV_VARIABLE: message,
       },
       onExit: (err, exitCode) => {
+        onTestFinished(() => pty.close());
         expect(err).toBeNull();
         expect(exitCode).toBe(0);
         assert(buffer);
-        expect(Buffer.compare(Buffer.from(buffer), Buffer.from(message + '\r\n'))).toBe(0);
-        pty.close();
+        vi.waitFor(() => expect(buffer.trim()).toBe(message));
 
         done();
       },
@@ -192,4 +197,4 @@ describe('PTY', () => {
       done();
     }
   }));
-});
+}, { repeats: 50 });

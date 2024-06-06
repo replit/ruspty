@@ -1,22 +1,19 @@
-use std::collections::HashMap;
-use std::io::Error;
-use std::io::ErrorKind;
-use std::os::fd::{AsRawFd, OwnedFd};
-use std::os::unix::process::CommandExt;
-use std::process::{Command, Stdio};
-use std::thread;
-use std::time::Duration;
-
-use backoff::backoff::Backoff;
-use backoff::ExponentialBackoffBuilder;
 use libc::{self, c_int};
 use napi::bindgen_prelude::JsFunction;
 use napi::threadsafe_function::{ErrorStrategy, ThreadsafeFunction, ThreadsafeFunctionCallMode};
 use napi::Status::GenericFailure;
 use napi::{self, Env};
-use rustix::event::{poll, PollFd, PollFlags};
-use rustix_openpty::openpty;
-use rustix_openpty::rustix::termios::{self, InputModes, OptionalActions, Winsize};
+use nix::errno::Errno;
+use nix::pty::{openpty, Winsize};
+use nix::sys::termios::{self, SetArg};
+use std::collections::HashMap;
+use std::io::Error;
+use std::io::ErrorKind;
+use std::os::fd::FromRawFd;
+use std::os::fd::{AsRawFd, OwnedFd};
+use std::os::unix::process::CommandExt;
+use std::process::{Command, Stdio};
+use std::thread;
 
 #[macro_use]
 extern crate napi_derive;
@@ -76,7 +73,7 @@ extern crate napi_derive;
 #[allow(dead_code)]
 struct Pty {
   controller_fd: Option<OwnedFd>,
-  should_dup_fds: bool,
+  user_fd: Option<OwnedFd>,
   /// The pid of the forked process.
   pub pid: u32,
 }
@@ -100,92 +97,15 @@ struct Size {
   pub rows: u16,
 }
 
-#[allow(dead_code)]
-fn set_controlling_terminal(fd: c_int) -> Result<(), Error> {
-  let res = unsafe {
-    #[allow(clippy::cast_lossless)]
-    libc::ioctl(fd, libc::TIOCSCTTY as _, 0)
-  };
-
-  if res != 0 {
-    return Err(Error::last_os_error());
-  }
-
-  Ok(())
-}
-
-#[allow(dead_code)]
-fn set_nonblocking(fd: c_int) -> Result<(), napi::Error> {
-  use libc::{fcntl, F_GETFL, F_SETFL, O_NONBLOCK};
-
-  let status_flags = unsafe { fcntl(fd, F_GETFL, 0) };
-
-  if status_flags < 0 {
-    return Err(napi::Error::new(
-      napi::Status::GenericFailure,
-      format!("fcntl F_GETFL failed: {}", Error::last_os_error()),
-    ));
-  }
-
-  let res = unsafe { fcntl(fd, F_SETFL, status_flags | O_NONBLOCK) };
-
-  if res != 0 {
-    return Err(napi::Error::new(
-      napi::Status::GenericFailure,
-      format!("fcntl F_SETFL failed: {}", Error::last_os_error()),
-    ));
-  }
-
-  Ok(())
-}
-
-/// Wait until the controller PTY doesn't have any more data left to read.
-#[allow(dead_code)]
-fn drain_controller(controller_fd: OwnedFd) {
-  let mut poll_fds = [PollFd::new(&controller_fd, PollFlags::IN)];
-  let mut backoff = ExponentialBackoffBuilder::new()
-    .with_initial_interval(Duration::from_millis(1))
-    .with_max_interval(Duration::from_millis(100))
-    .with_max_elapsed_time(Some(Duration::from_secs(2)))
-    .build();
-  loop {
-    for poll_fd in &mut poll_fds[..] {
-      poll_fd.clear_revents();
-    }
-    // We call poll in a non-blocking fashion, because all we are interested in is when it
-    // _stops_ being ready to read.
-    if let Err(errno) = poll(&mut poll_fds, 0) {
-      if errno == rustix::io::Errno::AGAIN || errno == rustix::io::Errno::INTR {
-        // These two errors are safe to retry.
-        continue;
-      }
-      // We tried!
-      break;
-    }
-    if poll_fds[0].revents().contains(PollFlags::IN) {
-      // There's still data to be read. We'll sit tight for a few milliseconds.
-      // If there was data, keep trying to read this FD.
-      if let Some(d) = backoff.next_backoff() {
-        thread::sleep(d);
-        continue;
-      } else {
-        // We have exhausted our attempts. Cut our losses and proceed.
-        break;
-      }
-    }
-
-    // Now that we're sure that the controller FD doesn't have any events, we have
-    // successfully drained the child's output, so we can now invoke the callback.
-    break;
-  }
+fn cast_to_napi_error(err: Errno) -> napi::Error {
+  napi::Error::new(GenericFailure, err)
 }
 
 #[napi]
 impl Pty {
   #[napi(constructor)]
   #[allow(dead_code)]
-  pub fn new(env: Env, opts: PtyOptions) -> Result<Self, napi::Error> {
-    let should_dup_fds = env.get_node_version()?.release == "node";
+  pub fn new(_env: Env, opts: PtyOptions) -> Result<Self, napi::Error> {
     let size = opts.size.unwrap_or(Size { cols: 80, rows: 24 });
     let window_size = Winsize {
       ws_col: size.cols,
@@ -199,50 +119,56 @@ impl Pty {
       cmd.args(args);
     }
 
-    let rustix_openpty::Pty {
-      controller: controller_fd,
-      user: user_fd,
-    } = openpty(None, Some(&window_size))
-      .map_err(|err| napi::Error::new(napi::Status::GenericFailure, err))?;
+    // open pty pair
+    let pty_res = openpty(&window_size, None).map_err(cast_to_napi_error)?;
+    let controller_fd = pty_res.master;
+    let user_fd = pty_res.slave;
 
-    if let Ok(mut termios) = termios::tcgetattr(&controller_fd) {
-      termios.input_modes.set(InputModes::IUTF8, true);
-      termios::tcsetattr(&controller_fd, OptionalActions::Now, &termios)
-        .map_err(|err| napi::Error::new(napi::Status::GenericFailure, err))?;
-    }
-
-    // The Drop implementation for Command will try to close _each_ stdio. That implies that it
-    // will try to close the three of them, so if we don't dup them, Rust will try to close the
-    // same FD three times, and if stars don't align, we might be even closing a different FD
-    // accidentally.
+    // duplicate pty user_fd to be the child's stdin, stdout, and stderr
     cmd.stdin(Stdio::from(user_fd.try_clone()?));
     cmd.stderr(Stdio::from(user_fd.try_clone()?));
     cmd.stdout(Stdio::from(user_fd.try_clone()?));
 
-    // We want the env to be clean, we can always pass in `process.env` if we want to.
+    // we want the env to be clean, we can always pass in `process.env` if we want to.
     cmd.env_clear();
     if let Some(envs) = opts.envs {
       cmd.envs(envs);
     }
+
+    // set working dir if applicable
     if let Some(dir) = opts.dir {
       cmd.current_dir(dir);
     }
 
     unsafe {
       let raw_user_fd = user_fd.as_raw_fd();
-      let raw_controller_fd = controller_fd.as_raw_fd();
+
+      // right before we spawn the child, we should do a bunch of setup
+      // this is all run in the context of the child process
       cmd.pre_exec(move || {
+        // start a new session
         let err = libc::setsid();
         if err == -1 {
-          return Err(Error::new(ErrorKind::Other, "Failed to set session id"));
+          return Err(Error::new(ErrorKind::Other, "setsid"));
         }
 
-        // stdin is wired to the tty, so we can use that for the controlling terminal.
-        set_controlling_terminal(0)?;
+        // become the controlling tty for the program
+        let err = libc::ioctl(raw_user_fd, libc::TIOCSCTTY.into(), 0);
+        if err == -1 {
+          return Err(Error::new(ErrorKind::Other, "ioctl-TIOCSCTTY"));
+        }
 
-        libc::close(raw_user_fd);
-        libc::close(raw_controller_fd);
+        // we dont need to drop any fds as we are the child and
+        // all fds we inherit have CLO_EXEC set
 
+        // set input modes
+        let user_fd = OwnedFd::from_raw_fd(raw_user_fd);
+        if let Ok(mut termios) = termios::tcgetattr(&user_fd) {
+          termios.input_flags |= termios::InputFlags::IUTF8;
+          termios::tcsetattr(&user_fd, SetArg::TCSANOW, &termios)?;
+        }
+
+        // reset signal handlers
         libc::signal(libc::SIGCHLD, libc::SIG_DFL);
         libc::signal(libc::SIGHUP, libc::SIG_DFL);
         libc::signal(libc::SIGINT, libc::SIG_DFL);
@@ -254,13 +180,8 @@ impl Pty {
       });
     }
 
-    let mut child = cmd
-      .spawn()
-      .map_err(|err| napi::Error::new(GenericFailure, err))?;
-
-    // We are marking the pty fd as non-blocking, despite Node's docs suggesting that the fd passed
-    // to `createReadStream`/`createWriteStream` should be blocking.
-    set_nonblocking(controller_fd.as_raw_fd())?;
+    // actually spawn the child
+    let mut child = cmd.spawn()?;
     let pid = child.id();
 
     // We're creating a new thread for every child, this uses a bit more system resources compared
@@ -276,62 +197,45 @@ impl Pty {
     //   they are ready to be `wait`'ed. This has the inconvenience that it consumes one FD per child.
     //
     // For discussion check out: https://github.com/replit/ruspty/pull/1#discussion_r1463672548
-    {
-      let controller_fd = controller_fd.try_clone().map_err(|err| {
-        napi::Error::new(
-          GenericFailure,
-          format!(
-            "OS error when setting up child process wait: {}",
-            err.raw_os_error().unwrap_or(-1)
-          ),
-        )
-      })?;
-      let ts_on_exit: ThreadsafeFunction<i32, ErrorStrategy::CalleeHandled> = opts
-        .on_exit
-        .create_threadsafe_function(0, |ctx| ctx.env.create_int32(ctx.value).map(|v| vec![v]))?;
-      thread::spawn(move || {
-        // wait for the process to go away and then keep
-        // polling the FD until all data has been read.
-        let controller_fd = Some(controller_fd);
-        let wait_result = child.wait();
-        if let Some(controller_fd) = controller_fd {
-          // If `on_data` was not passed, we still have one end of the PTY. We'll keep polling
-          // the FD (and sleeping a bit) until all data has been read. That will be done in a
-          // best-effort fashion. But never allow more than 2s to pass before we give up.
-          drain_controller(controller_fd);
-        }
-        // Now we drop the user_fd. We have fully read from it.
-        drop(user_fd);
-        match wait_result {
-          Ok(status) => {
-            if status.success() {
-              ts_on_exit.call(Ok(0), ThreadsafeFunctionCallMode::Blocking);
-            } else {
-              ts_on_exit.call(
-                Ok(status.code().unwrap_or(-1)),
-                ThreadsafeFunctionCallMode::Blocking,
-              );
-            }
-          }
-          Err(err) => {
+    let ts_on_exit: ThreadsafeFunction<i32, ErrorStrategy::CalleeHandled> = opts
+      .on_exit
+      .create_threadsafe_function(0, |ctx| ctx.env.create_int32(ctx.value).map(|v| vec![v]))?;
+
+    thread::spawn(move || {
+      let wait_result = child.wait();
+
+      // we don't drop fds immediately
+      // let pty.close() be responsible for closing them
+
+      match wait_result {
+        Ok(status) => {
+          if status.success() {
+            ts_on_exit.call(Ok(0), ThreadsafeFunctionCallMode::Blocking);
+          } else {
             ts_on_exit.call(
-              Err(napi::Error::new(
-                GenericFailure,
-                format!(
-                  "OS error when waiting for child process to exit: {}",
-                  err.raw_os_error().unwrap_or(-1)
-                ),
-              )),
+              Ok(status.code().unwrap_or(-1)),
               ThreadsafeFunctionCallMode::Blocking,
             );
           }
         }
-      });
-    }
+        Err(err) => {
+          ts_on_exit.call(
+            Err(napi::Error::new(
+              GenericFailure,
+              format!(
+                "OS error when waiting for child process to exit: {}",
+                err.raw_os_error().unwrap_or(-1)
+              ),
+            )),
+            ThreadsafeFunctionCallMode::Blocking,
+          );
+        }
+      }
+    });
 
     Ok(Pty {
       controller_fd: Some(controller_fd),
-      should_dup_fds,
+      user_fd: Some(user_fd),
       pid,
     })
   }
@@ -349,8 +253,7 @@ impl Pty {
 
     if let Some(fd) = &self.controller_fd {
       let res = unsafe { libc::ioctl(fd.as_raw_fd(), libc::TIOCSWINSZ, &window_size as *const _) };
-
-      if res != 0 {
+      if res == -1 {
         return Err(napi::Error::new(
           napi::Status::GenericFailure,
           format!("ioctl TIOCSWINSZ failed: {}", Error::last_os_error()),
@@ -376,9 +279,6 @@ impl Pty {
   #[allow(dead_code)]
   pub fn fd(&mut self) -> Result<c_int, napi::Error> {
     if let Some(fd) = &self.controller_fd {
-      if !self.should_dup_fds {
-        return Ok(fd.as_raw_fd());
-      }
       let res = unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_DUPFD_CLOEXEC, 3) };
       if res < 0 {
         return Err(napi::Error::new(
@@ -386,6 +286,7 @@ impl Pty {
           format!("fcntl F_DUPFD_CLOEXEC failed: {}", Error::last_os_error()),
         ));
       }
+
       Ok(res)
     } else {
       Err(napi::Error::new(
@@ -404,12 +305,12 @@ impl Pty {
   #[napi]
   #[allow(dead_code)]
   pub fn close(&mut self) -> Result<(), napi::Error> {
-    let controller_fd = self.controller_fd.take();
-    if controller_fd.is_none() {
-      return Err(napi::Error::new(
-        napi::Status::GenericFailure,
-        format!("close failed: {}", libc::EBADF),
-      ));
+    if let Some(fd) = self.controller_fd.take() {
+      drop(fd);
+    }
+
+    if let Some(fd) = self.user_fd.take() {
+      drop(fd);
     }
 
     Ok(())
