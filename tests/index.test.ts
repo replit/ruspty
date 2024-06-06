@@ -172,7 +172,6 @@ describe('PTY', () => {
         onTestFinished(() => pty.close());
         expect(err).toBeNull();
         expect(exitCode).toBe(0);
-        assert(buffer);
         vi.waitFor(() => expect(buffer.trim()).toBe(message));
 
         done();
