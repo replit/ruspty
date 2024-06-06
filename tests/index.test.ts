@@ -1,6 +1,6 @@
 import { Pty } from '../index';
 import fs, { readdirSync, readlinkSync } from 'fs';
-import { describe, test, expect, onTestFinished, vi, beforeEach, afterEach } from 'vitest';
+import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const EOT = '\x04';
 const procSelfFd = '/proc/self/fd/';
@@ -223,4 +223,4 @@ describe('PTY', () => {
       done();
     }
   }));
-});
+}, { repeats: 5 });
