@@ -303,11 +303,25 @@ impl Pty {
   #[allow(dead_code)]
   pub fn close(&mut self) -> Result<(), napi::Error> {
     if let Some(fd) = self.controller_fd.take() {
-      drop(fd);
+      unsafe {
+        if libc::close(fd.as_raw_fd()) == -1 {
+          return Err(napi::Error::new(
+            napi::Status::GenericFailure,
+            format!("close failed: {}", Error::last_os_error()),
+          ));
+        }
+      };
     }
 
     if let Some(fd) = self.user_fd.take() {
-      drop(fd);
+      unsafe {
+        if libc::close(fd.as_raw_fd()) == -1 {
+          return Err(napi::Error::new(
+            napi::Status::GenericFailure,
+            format!("close failed: {}", Error::last_os_error()),
+          ));
+        }
+      };
     }
 
     Ok(())
