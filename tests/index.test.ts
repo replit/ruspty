@@ -223,4 +223,4 @@ describe('PTY', () => {
       done();
     }
   }));
-}, { repeats: 5 });
+}, { repeats: 50 });
