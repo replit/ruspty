@@ -15,7 +15,7 @@ function createWriteStreamToPty(pty: Pty) {
   return fs.createWriteStream('', { fd, autoClose: false });
 }
 
-describe('PTY', () => {
+describe.concurrent('PTY', () => {
   test('spawns and exits', () => new Promise<void>((done) => {
     const message = 'hello from a pty';
     let buffer = '';
