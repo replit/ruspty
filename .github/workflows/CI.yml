@@ -76,6 +76,7 @@ jobs:
   publish:
     name: Publish
     runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
     needs:
       - build-test
     steps:
@@ -85,7 +86,7 @@ jobs:
         with:
           node-version: 20
       - name: Install dependencies
-        run: bun install
+        run: npm ci 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
