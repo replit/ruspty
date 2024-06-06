@@ -16,7 +16,7 @@ function createWriteStreamToPty(pty: Pty) {
 }
 
 describe('PTY', () => {
-  test('spawns and exits', () => new Promise<void>((done) => {
+  test('spawns and exits', () => new Promise<void>((done, reject) => {
     const message = 'hello from a pty';
     let buffer = '';
 
@@ -36,6 +36,13 @@ describe('PTY', () => {
     const readStream = createReadStreamFromPty(pty);
     readStream.on('data', (chunk) => {
       buffer = chunk.toString();
+    });
+    readStream.on('error', (err: any) => {
+      if (err.code && err.code.indexOf('EIO') !== -1) {
+        return;
+      }
+
+      reject(err);
     });
   }));
 
@@ -60,8 +67,9 @@ describe('PTY', () => {
     let buffer = '';
 
     // We have local echo enabled, so we'll read the message twice.
-    // `cat` on darwin also logs `^D`
-    const result = 'hello cat\r\n^D\b\bhello cat\r\n';
+    const result = process.platform === "darwin"
+      ? 'hello cat\r\n^D\b\bhello cat\r\n'
+      : 'hello cat\r\nhello cat\r\n';
 
     const pty = new Pty({
       command: '/bin/cat',
@@ -78,6 +86,13 @@ describe('PTY', () => {
 
     readStream.on('data', (data) => {
       buffer += data.toString();
+    });
+    readStream.on('error', (err: any) => {
+      if (err.code && err.code.indexOf('EIO') !== -1) {
+        return;
+      }
+
+      reject(err);
     });
 
     writeStream.write(message);
@@ -124,6 +139,13 @@ describe('PTY', () => {
         return;
       }
     });
+    readStream.on('error', (err: any) => {
+      if (err.code && err.code.indexOf('EIO') !== -1) {
+        return;
+      }
+
+      reject(err);
+    });
 
     writeStream.write("stty size; echo 'done1'\n");
     writeStream.on('error', (err: NodeJS.ErrnoException) => {
@@ -135,7 +157,7 @@ describe('PTY', () => {
     });
   }));
 
-  test('respects working directory', () => new Promise<void>((done) => {
+  test('respects working directory', () => new Promise<void>((done, reject) => {
     const cwd = process.cwd();
     let buffer = '';
 
@@ -156,9 +178,16 @@ describe('PTY', () => {
     readStream.on('data', (data) => {
       buffer += data.toString();
     });
+    readStream.on('error', (err: any) => {
+      if (err.code && err.code.indexOf('EIO') !== -1) {
+        return;
+      }
+
+      reject(err);
+    });
   }));
 
-  test('respects env', () => new Promise<void>((done) => {
+  test('respects env', () => new Promise<void>((done, reject) => {
     const message = 'hello from env';
     let buffer = '';
 
@@ -181,6 +210,13 @@ describe('PTY', () => {
     const readStream = createReadStreamFromPty(pty);
     readStream.on('data', (data) => {
       buffer += data.toString();
+    });
+    readStream.on('error', (err: any) => {
+      if (err.code && err.code.indexOf('EIO') !== -1) {
+        return;
+      }
+
+      reject(err);
     });
   }));
 

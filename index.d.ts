@@ -42,13 +42,12 @@ export interface Size {
  *
  * const read = new fs.createReadStream('', {
  *   fd: pty.fd(),
- *   start: 0,
  *   highWaterMark: 16 * 1024,
- *   autoClose: true,
+ *   autoClose: false,
  * });
  * const write = new fs.createWriteStream('', {
  *   fd: pty.fd(),
- *   autoClose: true,
+ *   autoClose: false,
  * });
  *
  * read.on('data', (chunk) => {
