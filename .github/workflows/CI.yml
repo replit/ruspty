@@ -78,7 +78,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bindings-${{ matrix.settings.target }}
-          path: ${{ matrix.settings.target }}/${{ env.APP_NAME }}.*.node
+          path: ${{ env.APP_NAME }}.*.node
           if-no-files-found: error
 
   publish:
