@@ -76,11 +76,7 @@ export class Pty {
   /** Resize the terminal. */
   resize(size: Size): void
   /**
-   * Returns a file descriptor for the PTY controller. If running under node, it will dup the file
-   * descriptor, but under bun it will return the same file desciptor, since bun does not close
-   * the streams by itself. Maybe that is a bug in bun, so we should confirm the new behavior
-   * after we upgrade.
-   *
+   * Returns a file descriptor for the PTY controller.
    * See the docstring of the class for an usage example.
    */
   fd(): c_int

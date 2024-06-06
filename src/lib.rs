@@ -141,6 +141,7 @@ impl Pty {
 
     unsafe {
       let raw_user_fd = user_fd.as_raw_fd();
+      let raw_controller_fd = controller_fd.as_raw_fd();
 
       // right before we spawn the child, we should do a bunch of setup
       // this is all run in the context of the child process
@@ -157,8 +158,9 @@ impl Pty {
           return Err(Error::new(ErrorKind::Other, "ioctl-TIOCSCTTY"));
         }
 
-        // we dont need to drop any fds as we are the child and
-        // all fds we inherit have CLO_EXEC set
+        // we need to drop the controller fd, since we don't need it in the child
+        // and it's not safe to keep it open
+        libc::close(raw_controller_fd);
 
         // set input modes
         let user_fd = OwnedFd::from_raw_fd(raw_user_fd);
@@ -268,17 +270,21 @@ impl Pty {
     }
   }
 
-  /// Returns a file descriptor for the PTY controller. If running under node, it will dup the file
-  /// descriptor, but under bun it will return the same file desciptor, since bun does not close
-  /// the streams by itself. Maybe that is a bug in bun, so we should confirm the new behavior
-  /// after we upgrade.
-  ///
+  /// Returns a file descriptor for the PTY controller.
   /// See the docstring of the class for an usage example.
   #[napi]
   #[allow(dead_code)]
   pub fn fd(&mut self) -> Result<c_int, napi::Error> {
     if let Some(fd) = &self.controller_fd {
-      Ok(fd.as_raw_fd())
+      let res = unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_DUPFD_CLOEXEC, 3) };
+      if res == -1 {
+        return Err(napi::Error::new(
+          napi::Status::GenericFailure,
+          format!("fcntl F_DUPFD_CLOEXEC failed: {}", Error::last_os_error()),
+        ));
+      }
+
+      Ok(res)
     } else {
       Err(napi::Error::new(
         napi::Status::GenericFailure,
