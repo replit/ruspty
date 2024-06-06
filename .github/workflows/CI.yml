@@ -69,8 +69,8 @@ jobs:
       - name: Build
         run: |-
           set -e &&
-          npm run build --target ${{ matrix.settings.target }} &&
-          strip -x ${{ matrix.settings.target }}/*.node
+          npm run build &&
+          strip -x *.node
         shell: bash
       - name: Test bindings
         run: npm run test
