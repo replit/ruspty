@@ -1,8 +1,10 @@
 import { Pty } from '../index';
 import fs from 'fs';
-import { describe, test, expect, onTestFinished, vi } from 'vitest';
+import { readdir, readlink } from 'fs/promises';
+import { describe, test, expect, onTestFinished, vi, beforeEach, afterEach } from 'vitest';
 
 const EOT = '\x04';
+const procSelfFd = '/proc/self/fd/';
 
 function createReadStreamFromPty(pty: Pty) {
   const fd = pty.fd();
@@ -23,6 +25,47 @@ const rejectOnNonEIO = (reject: (reason?: Error) => void) => (err: NodeJS.ErrnoE
 }
 
 describe('PTY', () => {
+  const previousFDs: Record<string, string> = {};
+  // These two functions ensure that there are no extra open file descriptors after each test
+  // finishes. Only works on Linux.
+  beforeEach(async () => {
+    if (process.platform !== 'linux') {
+      return;
+    }
+
+    for (const filename of await readdir(procSelfFd)) {
+      try {
+        previousFDs[filename] = await readlink(procSelfFd + filename);
+      } catch (err: any) {
+        if (err.code === 'ENOENT') {
+          continue;
+        }
+        throw err;
+      }
+    }
+  });
+
+  afterEach(async () => {
+    if (process.platform !== 'linux') {
+      return;
+    }
+
+    for (const filename of await readdir(procSelfFd)) {
+      try {
+        const linkTarget = await readlink(procSelfFd + filename);
+        if (linkTarget === 'anon_inode:[timerfd]') {
+          continue;
+        }
+        expect(previousFDs).toHaveProperty(filename, linkTarget);
+      } catch (err: any) {
+        if (err.code === 'ENOENT') {
+          continue;
+        }
+        throw err;
+      }
+    }
+  });
+
   test('spawns and exits', () => new Promise<void>((done, reject) => {
     const message = 'hello from a pty';
     let buffer = '';
@@ -195,4 +238,4 @@ describe('PTY', () => {
       done();
     }
   }));
-}, { repeats: 10 });
+});
