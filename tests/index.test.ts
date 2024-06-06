@@ -1,5 +1,4 @@
 import { Pty } from '../index';
-import assert from 'assert';
 import fs from 'fs';
 import { describe, test, expect, onTestFinished, vi } from 'vitest';
 
@@ -13,6 +12,14 @@ function createReadStreamFromPty(pty: Pty) {
 function createWriteStreamToPty(pty: Pty) {
   const fd = pty.fd();
   return fs.createWriteStream('', { fd, autoClose: false });
+}
+
+const rejectOnNonEIO = (reject: (reason?: Error) => void) => (err: NodeJS.ErrnoException) => {
+  if (err.code && err.code.indexOf('EIO') !== -1) {
+    return;
+  }
+
+  reject(err);
 }
 
 describe('PTY', () => {
@@ -37,13 +44,7 @@ describe('PTY', () => {
     readStream.on('data', (chunk) => {
       buffer = chunk.toString();
     });
-    readStream.on('error', (err: any) => {
-      if (err.code && err.code.indexOf('EIO') !== -1) {
-        return;
-      }
-
-      reject(err);
-    });
+    readStream.on('error', rejectOnNonEIO(reject));
   }));
 
   test('captures an exit code', () => new Promise<void>((done) => {
@@ -87,23 +88,10 @@ describe('PTY', () => {
     readStream.on('data', (data) => {
       buffer += data.toString();
     });
-    readStream.on('error', (err: any) => {
-      if (err.code && err.code.indexOf('EIO') !== -1) {
-        return;
-      }
-
-      reject(err);
-    });
-
+    readStream.on('error', rejectOnNonEIO(reject));
     writeStream.write(message);
     writeStream.end(EOT);
-    writeStream.on('error', (err: any) => {
-      if (err.code && err.code.indexOf('EIO') !== -1) {
-        return;
-      }
-
-      reject(err);
-    });
+    writeStream.on('error', rejectOnNonEIO(reject));
   }));
 
   test('can be resized', () => new Promise<void>((done, reject) => {
@@ -139,22 +127,9 @@ describe('PTY', () => {
         return;
       }
     });
-    readStream.on('error', (err: any) => {
-      if (err.code && err.code.indexOf('EIO') !== -1) {
-        return;
-      }
-
-      reject(err);
-    });
-
+    readStream.on('error', rejectOnNonEIO(reject));
     writeStream.write("stty size; echo 'done1'\n");
-    writeStream.on('error', (err: NodeJS.ErrnoException) => {
-      if (err.code && err.code.indexOf('EIO') !== -1) {
-        return;
-      }
-
-      reject(err);
-    });
+    writeStream.on('error', rejectOnNonEIO(reject));
   }));
 
   test('respects working directory', () => new Promise<void>((done, reject) => {
@@ -178,13 +153,7 @@ describe('PTY', () => {
     readStream.on('data', (data) => {
       buffer += data.toString();
     });
-    readStream.on('error', (err: any) => {
-      if (err.code && err.code.indexOf('EIO') !== -1) {
-        return;
-      }
-
-      reject(err);
-    });
+    readStream.on('error', rejectOnNonEIO(reject));
   }));
 
   test('respects env', () => new Promise<void>((done, reject) => {
@@ -211,13 +180,7 @@ describe('PTY', () => {
     readStream.on('data', (data) => {
       buffer += data.toString();
     });
-    readStream.on('error', (err: any) => {
-      if (err.code && err.code.indexOf('EIO') !== -1) {
-        return;
-      }
-
-      reject(err);
-    });
+    readStream.on('error', rejectOnNonEIO(reject));
   }));
 
   test("doesn't break when executing non-existing binary", () => new Promise<void>((done) => {
