@@ -77,18 +77,20 @@ jobs:
           options: '--user 0:0 -v ${{ github.workspace }}/.cargo-cache/git/db:/usr/local/cargo/git/db -v ${{ github.workspace }}/.cargo/registry/cache:/usr/local/cargo/registry/cache -v ${{ github.workspace }}/.cargo/registry/index:/usr/local/cargo/registry/index -v ${{ github.workspace }}:/build -w /build'
           run: |-
             set -e &&
-            npm run build
+            npm run build --target ${{ matrix.settings.target }} &&
+            strip -x ${{ matrix.settings.target }}/*.node
       - name: Build
         run: |-
           set -e &&
-          npm run build
+          npm run build --target ${{ matrix.settings.target }} &&
+          strip -x ${{ matrix.settings.target }}/*.node
         if: ${{ !matrix.settings.docker }}
         shell: bash
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: bindings-${{ matrix.settings.target }}
-          path: ${{ env.APP_NAME }}.*.node
+          path: ${{ matrix.settings.target }}/${{ env.APP_NAME }}.*.node
           if-no-files-found: error
 
   test:
