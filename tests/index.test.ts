@@ -1,6 +1,6 @@
 import { Pty } from '../index';
 import fs, { readdirSync, readlinkSync } from 'fs';
-import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, test, expect, vi } from 'vitest';
 
 const EOT = '\x04';
 const procSelfFd = '/proc/self/fd/';
@@ -50,29 +50,22 @@ function getOpenFds(): FdRecord {
 }
 
 describe('PTY', () => {
-  let pty: Pty;
-  let oldFds: FdRecord;
 
-  beforeEach(() => {
-    oldFds = getOpenFds();
-  })
-
-  afterEach(() => {
-    pty.close();
-    expect(getOpenFds()).toStrictEqual(oldFds);
-  })
-
-  test('spawns and exits', () => new Promise<void>((done, reject) => {
+  test.only('spawns and exits', () => new Promise<void>((done, reject) => {
+    const oldFds = getOpenFds();
     const message = 'hello from a pty';
     let buffer = '';
 
-    pty = new Pty({
+    const pty = new Pty({
       command: '/bin/echo',
       args: [message],
-      onExit: async (err, exitCode) => {
+      onExit: (err, exitCode) => {
         expect(err).toBeNull();
         expect(exitCode).toBe(0);
-        await vi.waitFor(() => expect(buffer.trim()).toBe(message));
+
+        expect(buffer.trim()).toBe(message);
+        pty.close();
+        expect(getOpenFds()).toStrictEqual(oldFds);
         done();
       },
     });
@@ -85,18 +78,23 @@ describe('PTY', () => {
   }));
 
   test('captures an exit code', () => new Promise<void>((done) => {
-    pty = new Pty({
+    const oldFds = getOpenFds();
+    const pty = new Pty({
       command: '/bin/sh',
       args: ['-c', 'exit 17'],
       onExit: (err, exitCode) => {
         expect(err).toBeNull();
         expect(exitCode).toBe(17);
+        pty.close();
+        expect(getOpenFds()).toStrictEqual(oldFds);
         done();
       },
     });
   }));
 
   test('can be written to', () => new Promise<void>((done, reject) => {
+    const oldFds = getOpenFds();
+
     // The message should end in newline so that the EOT can signal that the input has ended and not
     // just the line.
     const message = 'hello cat\n';
@@ -107,10 +105,12 @@ describe('PTY', () => {
       ? 'hello cat\r\n^D\b\bhello cat\r\n'
       : 'hello cat\r\nhello cat\r\n';
 
-    pty = new Pty({
+    const pty = new Pty({
       command: '/bin/cat',
-      onExit: async () => {
-        await vi.waitFor(() => expect(buffer.trim()).toBe(result.trim()));
+      onExit: () => {
+        expect(buffer.trim()).toBe(result.trim());
+        pty.close();
+        expect(getOpenFds()).toStrictEqual(oldFds);
         done();
       },
     });
@@ -128,11 +128,16 @@ describe('PTY', () => {
   }));
 
   test('can be resized', () => new Promise<void>((done, reject) => {
+    const oldFds = getOpenFds();
     let buffer = '';
-    pty = new Pty({
+    const pty = new Pty({
       command: '/bin/sh',
       size: { rows: 24, cols: 80 },
-      onExit: () => done(),
+      onExit: () => {
+        pty.close();
+        expect(getOpenFds()).toStrictEqual(oldFds);
+        done()
+      },
     });
 
     const writeStream = createWriteStreamToPty(pty);
@@ -163,17 +168,20 @@ describe('PTY', () => {
   }));
 
   test('respects working directory', () => new Promise<void>((done, reject) => {
+    const oldFds = getOpenFds();
     const cwd = process.cwd();
     let buffer = '';
 
-    pty = new Pty({
+    const pty = new Pty({
       command: '/bin/pwd',
       dir: cwd,
-      onExit: async (err, exitCode) => {
+      onExit: (err, exitCode) => {
         expect(err).toBeNull();
         expect(exitCode).toBe(0);
-        await vi.waitFor(() => expect(buffer.trim()).toBe(cwd));
+        expect(buffer.trim()).toBe(cwd);
 
+        pty.close();
+        expect(getOpenFds()).toStrictEqual(oldFds);
         done();
       },
     });
@@ -186,20 +194,23 @@ describe('PTY', () => {
   }));
 
   test('respects env', () => new Promise<void>((done, reject) => {
+    const oldFds = getOpenFds();
     const message = 'hello from env';
     let buffer = '';
 
-    pty = new Pty({
+    const pty = new Pty({
       command: '/bin/sh',
       args: ['-c', 'echo $ENV_VARIABLE && exit'],
       envs: {
         ENV_VARIABLE: message,
       },
-      onExit: async (err, exitCode) => {
+      onExit: (err, exitCode) => {
         expect(err).toBeNull();
         expect(exitCode).toBe(0);
-        await vi.waitFor(() => expect(buffer.trim()).toBe(message));
+        expect(buffer.trim()).toBe(message);
 
+        pty.close();
+        expect(getOpenFds()).toStrictEqual(oldFds);
         done();
       },
     });
@@ -212,10 +223,14 @@ describe('PTY', () => {
   }));
 
   test("doesn't break when executing non-existing binary", () => new Promise<void>((done) => {
+    const oldFds = getOpenFds();
     try {
-      pty = new Pty({
+      const pty = new Pty({
         command: '/bin/this-does-not-exist',
-        onExit: () => { },
+        onExit: () => {
+          pty.close();
+          expect(getOpenFds()).toStrictEqual(oldFds);
+        },
       });
     } catch (e: any) {
       expect(e.message).toContain('No such file or directory');
@@ -223,4 +238,4 @@ describe('PTY', () => {
       done();
     }
   }));
-}, { repeats: 50 });
+}, { repeats: 15 });

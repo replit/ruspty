@@ -1,19 +1,23 @@
+use backoff::backoff::Backoff;
+use backoff::ExponentialBackoffBuilder;
 use libc::{self, c_int};
 use napi::bindgen_prelude::JsFunction;
 use napi::threadsafe_function::{ErrorStrategy, ThreadsafeFunction, ThreadsafeFunctionCallMode};
 use napi::Status::GenericFailure;
 use napi::{self, Env};
 use nix::errno::Errno;
+use nix::poll::{poll, PollFd, PollFlags, PollTimeout};
 use nix::pty::{openpty, Winsize};
 use nix::sys::termios::{self, SetArg};
 use std::collections::HashMap;
 use std::io::Error;
 use std::io::ErrorKind;
-use std::os::fd::FromRawFd;
 use std::os::fd::{AsRawFd, OwnedFd};
+use std::os::fd::{BorrowedFd, FromRawFd, RawFd};
 use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
 use std::thread;
+use std::time::Duration;
 
 #[macro_use]
 extern crate napi_derive;
@@ -100,6 +104,47 @@ fn cast_to_napi_error(err: Errno) -> napi::Error {
   napi::Error::new(GenericFailure, err)
 }
 
+fn poll_controller_fd_until_read(raw_fd: RawFd) {
+  // we should wait until fd is fully read (i.e. POLLIN no longer set)
+  let borrowed_fd = unsafe { BorrowedFd::borrow_raw(raw_fd) };
+  let poll_fd = PollFd::new(borrowed_fd, PollFlags::POLLIN);
+
+  let mut backoff = ExponentialBackoffBuilder::default()
+    .with_initial_interval(Duration::from_millis(1))
+    .with_max_interval(Duration::from_millis(100))
+    .with_max_elapsed_time(Some(Duration::from_secs(1)))
+    .build();
+
+  loop {
+    if let Err(err) = poll(&mut [poll_fd], PollTimeout::ZERO) {
+      if err == Errno::EINTR || err == Errno::EAGAIN {
+        // we were interrupted, so we should just try again
+        continue;
+      }
+
+      // we should never hit this, but if we do, we should just break out of the loop
+      break;
+    }
+
+    // check if POLLIN is no longer set
+    if let Some(flags) = poll_fd.revents() {
+      if !flags.contains(PollFlags::POLLIN) {
+        break;
+      }
+    }
+
+    // wait for a bit before trying again
+    if let Some(d) = backoff.next_backoff() {
+      thread::sleep(d);
+      continue;
+    } else {
+      // We have exhausted our attempts. Cut our losses and
+      // proceed.
+      break;
+    }
+  }
+}
+
 #[napi]
 impl Pty {
   #[napi(constructor)]
@@ -139,10 +184,9 @@ impl Pty {
       cmd.current_dir(dir);
     }
 
+    let raw_user_fd = user_fd.as_raw_fd();
+    let raw_controller_fd = controller_fd.as_raw_fd();
     unsafe {
-      let raw_user_fd = user_fd.as_raw_fd();
-      let raw_controller_fd = controller_fd.as_raw_fd();
-
       // right before we spawn the child, we should do a bunch of setup
       // this is all run in the context of the child process
       cmd.pre_exec(move || {
@@ -207,6 +251,8 @@ impl Pty {
 
       // we don't drop fds immediately
       // let pty.close() be responsible for closing them
+
+      poll_controller_fd_until_read(raw_controller_fd);
 
       match wait_result {
         Ok(status) => {
@@ -280,7 +326,7 @@ impl Pty {
     } else {
       Err(napi::Error::new(
         napi::Status::GenericFailure,
-        "fcntl F_DUPFD_CLOEXEC failed: bad file descriptor (os error 9)",
+        "fd failed: bad file descriptor (os error 9)",
       ))
     }
   }
