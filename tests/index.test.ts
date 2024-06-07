@@ -108,12 +108,15 @@ describe('PTY', () => {
   test('can be resized', () => new Promise<void>(done => {
     const oldFds = getOpenFds();
     let buffer = '';
+    let state: 'expectPrompt' | 'expectDone1' | 'expectDone2' | 'done' = 'expectPrompt';
     const pty = new Pty({
       command: '/bin/sh',
       size: { rows: 24, cols: 80 },
       onExit: (err, exitCode) => {
         expect(err).toBeNull();
         expect(exitCode).toBe(0);
+
+        expect(state).toBe('done');
         expect(getOpenFds()).toStrictEqual(oldFds);
         done()
       },
@@ -125,23 +128,30 @@ describe('PTY', () => {
     readStream.on('data', (data) => {
       buffer += data.toString();
 
-      if (buffer.includes('done1\r\n')) {
+      if (state === 'expectPrompt' && buffer.endsWith('$ ')) {
+        writeStream.write("stty size; echo 'done1'\n");
+        state = 'expectDone1';
+        return;
+      }
+
+      if (state === 'expectDone1' && buffer.includes('done1\r\n')) {
+        state = 'expectDone2';
         expect(buffer).toContain('24 80');
         pty.resize({ rows: 60, cols: 100 });
-        buffer = '';
 
         writeStream.write("stty size; echo 'done2'\n");
         return;
       }
 
-      if (buffer.includes('done2\r\n')) {
+      if (state === 'expectDone2' && buffer.includes('done2\r\n')) {
         expect(buffer).toContain('60 100');
+        state = 'done';
 
         writeStream.write(EOT);
         return;
       }
     });
-    writeStream.write("stty size; echo 'done1'\n");
+
   }));
 
   test('respects working directory', () => new Promise<void>(done => {
