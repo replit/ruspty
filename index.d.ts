@@ -17,60 +17,6 @@ export interface Size {
   cols: number
   rows: number
 }
-/**
- * A very thin wrapper around PTYs and processes. The caller is responsible for calling `.close()`
- * when all streams have been closed. We hold onto both ends of the PTY (controller and user) to
- * prevent reads from erroring out with EIO.
- *
- * This is the recommended usage:
- *
- * ```
- * const { Pty } = require('@replit/ruspty');
- * const fs = require('fs');
- *
- * const pty = new Pty({
- *   command: 'sh',
- *   args: [],
- *   envs: ENV,
- *   dir: CWD,
- *   size: { rows: 24, cols: 80 },
- *   onExit: (...result) => {
- *     // TODO: Handle process exit.
- *   },
- * });
- *
- * const read = new fs.createReadStream('', {
- *   fd: pty.fd(),
- *   autoClose: false,
- * });
- * const write = new fs.createWriteStream('', {
- *   fd: pty.fd(),
- *   autoClose: false,
- * });
- *
- * read.on('data', (chunk) => {
- *   // TODO: Handle data.
- * });
- * read.on('error', (err) => {
- *   if (err.code && err.code.indexOf('EIO') !== -1) {
- *     // This is expected to happen when the process exits.
- *     return;
- *   }
- *   // TODO: Handle the error.
- * });
- * read.on('end', () => {
- *   // handle cleanup here
- *   pty.close();
- * });
- * write.on('error', (err) => {
- *   if (err.code && err.code.indexOf('EIO') !== -1) {
- *     // This is expected to happen when the process exits.
- *     return;
- *   }
- *   // TODO: Handle the error.
- * });
- * ```
- */
 export class Pty {
   /** The pid of the forked process. */
   pid: number

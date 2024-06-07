@@ -3,7 +3,7 @@
 Running:
 
 - `npm install`
-- `npm run build` / `npm run build:debug`
+- `npm run build`
 - `npm run test`
 
 The code mainly targets Node on Linux.

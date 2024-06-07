@@ -1,27 +1,9 @@
-import { Pty } from '../index';
-import fs, { readdirSync, readlinkSync } from 'fs';
+import { Pty } from '../wrapper';
+import { readdirSync, readlinkSync } from 'fs';
 import { describe, test, expect } from 'vitest';
 
 const EOT = '\x04';
 const procSelfFd = '/proc/self/fd/';
-
-function createReadStreamFromPty(pty: Pty) {
-  const fd = pty.fd();
-  return fs.createReadStream('', { fd, autoClose: false });
-}
-
-function createWriteStreamToPty(pty: Pty) {
-  const fd = pty.fd();
-  return fs.createWriteStream('', { fd, autoClose: false });
-}
-
-const rejectOnNonEIO = (reject: (reason?: Error) => void) => (err: NodeJS.ErrnoException) => {
-  if (err.code && err.code.indexOf('EIO') !== -1) {
-    return;
-  }
-
-  reject(err);
-}
 
 type FdRecord = Record<string, string>;
 function getOpenFds(): FdRecord {
@@ -51,7 +33,7 @@ function getOpenFds(): FdRecord {
 
 describe('PTY', () => {
 
-  test('spawns and exits', () => new Promise<void>((done, reject) => {
+  test('spawns and exits', () => new Promise<void>(done => {
     const oldFds = getOpenFds();
     const message = 'hello from a pty';
     let buffer = '';
@@ -62,20 +44,16 @@ describe('PTY', () => {
       onExit: (err, exitCode) => {
         expect(err).toBeNull();
         expect(exitCode).toBe(0);
+        expect(buffer.trim()).toBe(message);
+        expect(getOpenFds()).toStrictEqual(oldFds);
+        done()
       },
     });
 
-    const readStream = createReadStreamFromPty(pty);
+    const readStream = pty.read;
     readStream.on('data', (chunk) => {
       buffer = chunk.toString();
     });
-    readStream.on('end', () => {
-      pty.close();
-      expect(buffer.trim()).toBe(message);
-      expect(getOpenFds()).toStrictEqual(oldFds);
-      done()
-    });
-    readStream.on('error', rejectOnNonEIO(reject));
   }));
 
   test('captures an exit code', () => new Promise<void>(done => {
@@ -93,7 +71,7 @@ describe('PTY', () => {
     });
   }));
 
-  test('can be written to', () => new Promise<void>((done, reject) => {
+  test('can be written to', () => new Promise<void>(done => {
     const oldFds = getOpenFds();
 
     // The message should end in newline so that the EOT can signal that the input has ended and not
@@ -111,28 +89,23 @@ describe('PTY', () => {
       onExit: (err, exitCode) => {
         expect(err).toBeNull();
         expect(exitCode).toBe(0);
+        expect(buffer.trim()).toBe(result.trim());
+        expect(getOpenFds()).toStrictEqual(oldFds);
+        done();
       },
     });
 
-    const writeStream = createWriteStreamToPty(pty);
-    const readStream = createReadStreamFromPty(pty);
+    const writeStream = pty.write;
+    const readStream = pty.read;
 
     readStream.on('data', (data) => {
       buffer += data.toString();
     });
-    readStream.on('end', () => {
-      pty.close();
-      expect(buffer.trim()).toBe(result.trim());
-      expect(getOpenFds()).toStrictEqual(oldFds);
-      done();
-    })
-    readStream.on('error', rejectOnNonEIO(reject));
     writeStream.write(message);
     writeStream.end(EOT);
-    writeStream.on('error', rejectOnNonEIO(reject));
   }));
 
-  test('can be resized', () => new Promise<void>((done, reject) => {
+  test('can be resized', () => new Promise<void>(done => {
     const oldFds = getOpenFds();
     let buffer = '';
     const pty = new Pty({
@@ -141,11 +114,13 @@ describe('PTY', () => {
       onExit: (err, exitCode) => {
         expect(err).toBeNull();
         expect(exitCode).toBe(0);
+        expect(getOpenFds()).toStrictEqual(oldFds);
+        done()
       },
     });
 
-    const writeStream = createWriteStreamToPty(pty);
-    const readStream = createReadStreamFromPty(pty);
+    const writeStream = pty.write;
+    const readStream = pty.read;
 
     readStream.on('data', (data) => {
       buffer += data.toString();
@@ -166,17 +141,10 @@ describe('PTY', () => {
         return;
       }
     });
-    readStream.on('end', () => {
-      pty.close();
-      expect(getOpenFds()).toStrictEqual(oldFds);
-      done()
-    })
-    readStream.on('error', rejectOnNonEIO(reject));
     writeStream.write("stty size; echo 'done1'\n");
-    writeStream.on('error', rejectOnNonEIO(reject));
   }));
 
-  test('respects working directory', () => new Promise<void>((done, reject) => {
+  test('respects working directory', () => new Promise<void>(done => {
     const oldFds = getOpenFds();
     const cwd = process.cwd();
     let buffer = '';
@@ -187,23 +155,19 @@ describe('PTY', () => {
       onExit: (err, exitCode) => {
         expect(err).toBeNull();
         expect(exitCode).toBe(0);
+        expect(buffer.trim()).toBe(cwd);
+        expect(getOpenFds()).toStrictEqual(oldFds);
+        done();
       },
     });
 
-    const readStream = createReadStreamFromPty(pty);
+    const readStream = pty.read;
     readStream.on('data', (data) => {
       buffer += data.toString();
     });
-    readStream.on('end', () => {
-      pty.close();
-      expect(buffer.trim()).toBe(cwd);
-      expect(getOpenFds()).toStrictEqual(oldFds);
-      done();
-    })
-    readStream.on('error', rejectOnNonEIO(reject));
   }));
 
-  test('respects env', () => new Promise<void>((done, reject) => {
+  test('respects env', () => new Promise<void>(done => {
     const oldFds = getOpenFds();
     const message = 'hello from env';
     let buffer = '';
@@ -217,20 +181,16 @@ describe('PTY', () => {
       onExit: (err, exitCode) => {
         expect(err).toBeNull();
         expect(exitCode).toBe(0);
+        expect(buffer.trim()).toBe(message);
+        expect(getOpenFds()).toStrictEqual(oldFds);
+        done();
       },
     });
 
-    const readStream = createReadStreamFromPty(pty);
+    const readStream = pty.read;
     readStream.on('data', (data) => {
       buffer += data.toString();
     });
-    readStream.on('end', () => {
-      pty.close();
-      expect(buffer.trim()).toBe(message);
-      expect(getOpenFds()).toStrictEqual(oldFds);
-      done();
-    });
-    readStream.on('error', rejectOnNonEIO(reject));
   }));
 
   test("doesn't break when executing non-existing binary", () => new Promise<void>((done) => {

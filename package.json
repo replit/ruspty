@@ -1,8 +1,8 @@
 {
   "name": "@replit/ruspty",
   "version": "3.0.0",
-  "main": "index.js",
-  "types": "index.d.ts",
+  "main": "dist/wrapper.js",
+  "types": "dist/wrapper.d.ts",
   "author": "Szymon Kaliski <hi@szymonkaliski.com>",
   "repository": {
     "type": "git",
@@ -26,15 +26,17 @@
   "license": "MIT",
   "devDependencies": {
     "@napi-rs/cli": "^2.18.2",
+    "@napi-rs/triples": "^1.2.0",
     "@types/jest": "^29.5.11",
     "@types/node": "^20.14.2",
     "prettier": "^3.2.4",
+    "tsup": "^8.1.0",
+    "typescript": "^5.4.5",
     "vitest": "^1.6.0"
   },
   "scripts": {
     "artifacts": "napi artifacts",
-    "build": "napi build --platform --release",
-    "build:debug": "napi build --platform",
+    "build": "napi build --platform --release && tsup",
     "prepublishOnly": "napi prepublish -t npm",
     "test": "vitest run",
     "test:hang": "vitest run --reporter=hanging-process",
@@ -42,10 +44,5 @@
     "version": "napi version",
     "release": "npm publish --access public",
     "format": "npx prettier *.ts,*.js --write"
-  },
-  "optionalDependencies": {
-    "@replit/ruspty-darwin-x64": "3.0.0",
-    "@replit/ruspty-darwin-arm64": "3.0.0",
-    "@replit/ruspty-linux-x64-gnu": "3.0.0"
   }
 }
