@@ -20,7 +20,7 @@ type ExitResult = {
  * const fs = require('fs');
  *
  * const pty = new Pty({
- *   command: 'sh',
+ *   command: '/bin/sh',
  *   args: [],
  *   envs: ENV,
  *   dir: CWD,
@@ -36,12 +36,7 @@ type ExitResult = {
  * read.on('data', (chunk) => {
  *   // TODO: Handle data.
  * });
- * read.on('error', (err) => {
- *   // TODO: Handle the error.
- * });
- * write.on('error', (err) => {
- *   // TODO: Handle the error.
- * });
+ * write.write('echo hello\n');
  */
 export class Pty {
   #pty: RawPty;
