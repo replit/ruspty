@@ -39,14 +39,12 @@ extern crate napi_derive;
 ///   dir: CWD,
 ///   size: { rows: 24, cols: 80 },
 ///   onExit: (...result) => {
-///     pty.close();
 ///     // TODO: Handle process exit.
 ///   },
 /// });
 ///
 /// const read = new fs.createReadStream('', {
 ///   fd: pty.fd(),
-///   highWaterMark: 16 * 1024,
 ///   autoClose: false,
 /// });
 /// const write = new fs.createWriteStream('', {
@@ -64,6 +62,10 @@ extern crate napi_derive;
 ///   }
 ///   // TODO: Handle the error.
 /// });
+/// read.on('end', () => {
+///   // handle cleanup here
+///   pty.close();
+/// });
 /// write.on('error', (err) => {
 ///   if (err.code && err.code.indexOf('EIO') !== -1) {
 ///     // This is expected to happen when the process exits.
@@ -76,7 +78,6 @@ extern crate napi_derive;
 #[allow(dead_code)]
 struct Pty {
   controller_fd: Option<OwnedFd>,
-  user_fd: Option<OwnedFd>,
   /// The pid of the forked process.
   pub pid: u32,
 }
@@ -126,7 +127,7 @@ fn poll_controller_fd_until_read(raw_fd: RawFd) {
       break;
     }
 
-    // check if POLLIN is no longer set
+    // check if POLLIN is no longer set (i.e. there is no more data to read)
     if let Some(flags) = poll_fd.revents() {
       if !flags.contains(PollFlags::POLLIN) {
         break;
@@ -138,8 +139,7 @@ fn poll_controller_fd_until_read(raw_fd: RawFd) {
       thread::sleep(d);
       continue;
     } else {
-      // We have exhausted our attempts. Cut our losses and
-      // proceed.
+      // we have exhausted our attempts, its joever
       break;
     }
   }
@@ -249,10 +249,12 @@ impl Pty {
     thread::spawn(move || {
       let wait_result = child.wait();
 
-      // we don't drop fds immediately
-      // let pty.close() be responsible for closing them
-
+      // try to wait for the controller fd to be fully read 
       poll_controller_fd_until_read(raw_controller_fd);
+
+      // we don't drop the controller fd immediately
+      // let pty.close() be responsible for closing it
+      drop(user_fd);
 
       match wait_result {
         Ok(status) => {
@@ -282,7 +284,6 @@ impl Pty {
 
     Ok(Pty {
       controller_fd: Some(controller_fd),
-      user_fd: Some(user_fd),
       pid,
     })
   }
@@ -342,23 +343,8 @@ impl Pty {
   pub fn close(&mut self) -> Result<(), napi::Error> {
     if let Some(fd) = self.controller_fd.take() {
       unsafe {
-        if libc::close(fd.as_raw_fd()) == -1 {
-          return Err(napi::Error::new(
-            napi::Status::GenericFailure,
-            format!("close failed: {}", Error::last_os_error()),
-          ));
-        }
-      };
-    }
-
-    if let Some(fd) = self.user_fd.take() {
-      unsafe {
-        if libc::close(fd.as_raw_fd()) == -1 {
-          return Err(napi::Error::new(
-            napi::Status::GenericFailure,
-            format!("close failed: {}", Error::last_os_error()),
-          ));
-        }
+        // ok to best-effort close as node can also close this via autoClose
+        libc::close(fd.as_raw_fd());
       };
     }
 

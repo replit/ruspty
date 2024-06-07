@@ -1,6 +1,6 @@
 import { Pty } from '../index';
 import fs, { readdirSync, readlinkSync } from 'fs';
-import { describe, test, expect, vi } from 'vitest';
+import { describe, test, expect } from 'vitest';
 
 const EOT = '\x04';
 const procSelfFd = '/proc/self/fd/';
@@ -51,7 +51,7 @@ function getOpenFds(): FdRecord {
 
 describe('PTY', () => {
 
-  test.only('spawns and exits', () => new Promise<void>((done, reject) => {
+  test('spawns and exits', () => new Promise<void>((done, reject) => {
     const oldFds = getOpenFds();
     const message = 'hello from a pty';
     let buffer = '';
@@ -62,11 +62,6 @@ describe('PTY', () => {
       onExit: (err, exitCode) => {
         expect(err).toBeNull();
         expect(exitCode).toBe(0);
-
-        expect(buffer.trim()).toBe(message);
-        pty.close();
-        expect(getOpenFds()).toStrictEqual(oldFds);
-        done();
       },
     });
 
@@ -74,10 +69,16 @@ describe('PTY', () => {
     readStream.on('data', (chunk) => {
       buffer = chunk.toString();
     });
+    readStream.on('end', () => {
+      pty.close();
+      expect(buffer.trim()).toBe(message);
+      expect(getOpenFds()).toStrictEqual(oldFds);
+      done()
+    });
     readStream.on('error', rejectOnNonEIO(reject));
   }));
 
-  test('captures an exit code', () => new Promise<void>((done) => {
+  test('captures an exit code', () => new Promise<void>(done => {
     const oldFds = getOpenFds();
     const pty = new Pty({
       command: '/bin/sh',
@@ -107,11 +108,9 @@ describe('PTY', () => {
 
     const pty = new Pty({
       command: '/bin/cat',
-      onExit: () => {
-        expect(buffer.trim()).toBe(result.trim());
-        pty.close();
-        expect(getOpenFds()).toStrictEqual(oldFds);
-        done();
+      onExit: (err, exitCode) => {
+        expect(err).toBeNull();
+        expect(exitCode).toBe(0);
       },
     });
 
@@ -121,6 +120,12 @@ describe('PTY', () => {
     readStream.on('data', (data) => {
       buffer += data.toString();
     });
+    readStream.on('end', () => {
+      pty.close();
+      expect(buffer.trim()).toBe(result.trim());
+      expect(getOpenFds()).toStrictEqual(oldFds);
+      done();
+    })
     readStream.on('error', rejectOnNonEIO(reject));
     writeStream.write(message);
     writeStream.end(EOT);
@@ -133,10 +138,9 @@ describe('PTY', () => {
     const pty = new Pty({
       command: '/bin/sh',
       size: { rows: 24, cols: 80 },
-      onExit: () => {
-        pty.close();
-        expect(getOpenFds()).toStrictEqual(oldFds);
-        done()
+      onExit: (err, exitCode) => {
+        expect(err).toBeNull();
+        expect(exitCode).toBe(0);
       },
     });
 
@@ -162,6 +166,11 @@ describe('PTY', () => {
         return;
       }
     });
+    readStream.on('end', () => {
+      pty.close();
+      expect(getOpenFds()).toStrictEqual(oldFds);
+      done()
+    })
     readStream.on('error', rejectOnNonEIO(reject));
     writeStream.write("stty size; echo 'done1'\n");
     writeStream.on('error', rejectOnNonEIO(reject));
@@ -178,11 +187,6 @@ describe('PTY', () => {
       onExit: (err, exitCode) => {
         expect(err).toBeNull();
         expect(exitCode).toBe(0);
-        expect(buffer.trim()).toBe(cwd);
-
-        pty.close();
-        expect(getOpenFds()).toStrictEqual(oldFds);
-        done();
       },
     });
 
@@ -190,6 +194,12 @@ describe('PTY', () => {
     readStream.on('data', (data) => {
       buffer += data.toString();
     });
+    readStream.on('end', () => {
+      pty.close();
+      expect(buffer.trim()).toBe(cwd);
+      expect(getOpenFds()).toStrictEqual(oldFds);
+      done();
+    })
     readStream.on('error', rejectOnNonEIO(reject));
   }));
 
@@ -207,17 +217,18 @@ describe('PTY', () => {
       onExit: (err, exitCode) => {
         expect(err).toBeNull();
         expect(exitCode).toBe(0);
-        expect(buffer.trim()).toBe(message);
-
-        pty.close();
-        expect(getOpenFds()).toStrictEqual(oldFds);
-        done();
       },
     });
 
     const readStream = createReadStreamFromPty(pty);
     readStream.on('data', (data) => {
       buffer += data.toString();
+    });
+    readStream.on('end', () => {
+      pty.close();
+      expect(buffer.trim()).toBe(message);
+      expect(getOpenFds()).toStrictEqual(oldFds);
+      done();
     });
     readStream.on('error', rejectOnNonEIO(reject));
   }));
@@ -238,4 +249,4 @@ describe('PTY', () => {
       done();
     }
   }));
-}, { repeats: 15 });
+}, { repeats: 50 });

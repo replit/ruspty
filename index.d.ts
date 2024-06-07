@@ -35,14 +35,12 @@ export interface Size {
  *   dir: CWD,
  *   size: { rows: 24, cols: 80 },
  *   onExit: (...result) => {
- *     pty.close();
  *     // TODO: Handle process exit.
  *   },
  * });
  *
  * const read = new fs.createReadStream('', {
  *   fd: pty.fd(),
- *   highWaterMark: 16 * 1024,
  *   autoClose: false,
  * });
  * const write = new fs.createWriteStream('', {
@@ -59,6 +57,10 @@ export interface Size {
  *     return;
  *   }
  *   // TODO: Handle the error.
+ * });
+ * read.on('end', () => {
+ *   // handle cleanup here
+ *   pty.close();
  * });
  * write.on('error', (err) => {
  *   if (err.code && err.code.indexOf('EIO') !== -1) {
