@@ -53,8 +53,11 @@ fn cast_to_napi_error(err: Errno) -> napi::Error {
   napi::Error::new(GenericFailure, err)
 }
 
+// if the child process exits before the controller fd is fully read, we might accidentally
+// end in a case where onExit is called but js hasn't had the chance to fully read the controller fd
+// let's wait until the controller fd is fully read before we call onExit
 fn poll_controller_fd_until_read(raw_fd: RawFd) {
-  // we should wait until fd is fully read (i.e. POLLIN no longer set)
+  // wait until fd is fully read (i.e. POLLIN no longer set)
   let borrowed_fd = unsafe { BorrowedFd::borrow_raw(raw_fd) };
   let poll_fd = PollFd::new(borrowed_fd, PollFlags::POLLIN);
 

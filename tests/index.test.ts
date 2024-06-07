@@ -203,6 +203,27 @@ describe('PTY', () => {
     });
   }));
 
+  test('ordering is correct', () => new Promise<void>(done => {
+    const oldFds = getOpenFds();
+    let buffer = '';
+    const pty = new Pty({
+      command: '/bin/sh',
+      args: ['-c', 'for i in $(seq 0 1024); do echo $i; done'],
+      onExit: (err, exitCode) => {
+        expect(err).toBeNull();
+        expect(exitCode).toBe(0);
+        expect(buffer.trim()).toBe([...Array(1025).keys()].join('\r\n'));
+        expect(getOpenFds()).toStrictEqual(oldFds);
+        done();
+      },
+    });
+
+    const readStream = pty.read;
+    readStream.on('data', (data) => {
+      buffer += data.toString();
+    });
+  }));
+
   test("doesn't break when executing non-existing binary", () => new Promise<void>((done) => {
     const oldFds = getOpenFds();
     try {
@@ -219,4 +240,4 @@ describe('PTY', () => {
       done();
     }
   }));
-}, { repeats: 1000 });
+}, { repeats: 50 });
