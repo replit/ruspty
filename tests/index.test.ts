@@ -58,13 +58,12 @@ describe('PTY', () => {
 
   test('captures an exit code', () => new Promise<void>(done => {
     const oldFds = getOpenFds();
-    const pty = new Pty({
+    new Pty({
       command: '/bin/sh',
       args: ['-c', 'exit 17'],
       onExit: (err, exitCode) => {
         expect(err).toBeNull();
         expect(exitCode).toBe(17);
-        pty.close();
         expect(getOpenFds()).toStrictEqual(oldFds);
         done();
       },
@@ -203,16 +202,17 @@ describe('PTY', () => {
     });
   }));
 
-  test('ordering is correct', () => new Promise<void>(done => {
+  test.only('ordering is correct', () => new Promise<void>(done => {
     const oldFds = getOpenFds();
-    let buffer = '';
+    let buffer = Buffer.from('');
+    const n = 1024;
     const pty = new Pty({
       command: '/bin/sh',
-      args: ['-c', 'for i in $(seq 0 1024); do echo $i; done'],
+      args: ['-c', `for i in $(seq 0 ${n}); do /bin/echo $i; done && exit`],
       onExit: (err, exitCode) => {
         expect(err).toBeNull();
         expect(exitCode).toBe(0);
-        expect(buffer.trim()).toBe([...Array(1025).keys()].join('\r\n'));
+        expect(buffer.toString().trim()).toBe([...Array(n + 1).keys()].join('\r\n'));
         expect(getOpenFds()).toStrictEqual(oldFds);
         done();
       },
@@ -220,17 +220,16 @@ describe('PTY', () => {
 
     const readStream = pty.read;
     readStream.on('data', (data) => {
-      buffer += data.toString();
+      buffer = Buffer.concat([buffer, data]);
     });
   }));
 
   test("doesn't break when executing non-existing binary", () => new Promise<void>((done) => {
     const oldFds = getOpenFds();
     try {
-      const pty = new Pty({
+      new Pty({
         command: '/bin/this-does-not-exist',
         onExit: () => {
-          pty.close();
           expect(getOpenFds()).toStrictEqual(oldFds);
         },
       });
