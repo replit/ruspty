@@ -1,5 +1,5 @@
-run = "bun run build:debug && bun test"
-modules = ["bun-1.0:v17-20240117-0bd73cd", "nodejs-20:v24-20240117-0bd73cd", "rust-stable:v4-20240117-0bd73cd"]
+run = "npm run build && npm test"
+modules = ["rust-stable", "nodejs-20", "nix"]
 
 disableGuessImports = true
 disableInstallBeforeRun = true

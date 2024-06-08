@@ -22,42 +22,27 @@ permissions:
   pull_request: null
 
 jobs:
-  build:
+  build-test:
     strategy:
       fail-fast: false
       matrix:
         settings:
           - host: macos-14-large
             target: x86_64-apple-darwin
-            architecture: x64
-            build: |-
-              set -e &&
-              bun run build --target x86_64-apple-darwin &&
-              strip -x *.node
+          - host: macos-latest
+            target: aarch64-apple-darwin
           - host: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            docker: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-debian
-            build: |-
-              set -e &&
-              npm install -g bun &&
-              bun run build --target x86_64-unknown-linux-gnu &&
-              strip *.node
-    name: Build on ${{ matrix.settings.target }}
+    name: Build and test on ${{ matrix.settings.target }}
     runs-on: ${{ matrix.settings.host }}
     steps:
       - uses: actions/checkout@v4
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v1
-        with:
-          bun-version: 1.1.6
       - name: Setup node
         uses: actions/setup-node@v4
-        if: ${{ !matrix.settings.docker }}
         with:
           node-version: 20
       - name: Install
         uses: dtolnay/rust-toolchain@stable
-        if: ${{ !matrix.settings.docker }}
         with:
           toolchain: stable
           targets: ${{ matrix.settings.target }}
@@ -71,27 +56,16 @@ jobs:
             .cargo-cache
             target/
           key: ${{ matrix.settings.target }}-cargo-${{ matrix.settings.host }}
-      - uses: goto-bus-stop/setup-zig@v2
-        if: ${{ matrix.settings.target == 'armv7-unknown-linux-gnueabihf' }}
-        with:
-          version: 0.11.0
-      - name: Setup toolchain
-        run: ${{ matrix.settings.setup }}
-        if: ${{ matrix.settings.setup }}
-        shell: bash
       - name: Install dependencies
-        run: bun install
-      - name: Build in docker
-        uses: addnab/docker-run-action@v3
-        if: ${{ matrix.settings.docker }}
-        with:
-          image: ${{ matrix.settings.docker }}
-          options: '--user 0:0 -v ${{ github.workspace }}/.cargo-cache/git/db:/usr/local/cargo/git/db -v ${{ github.workspace }}/.cargo/registry/cache:/usr/local/cargo/registry/cache -v ${{ github.workspace }}/.cargo/registry/index:/usr/local/cargo/registry/index -v ${{ github.workspace }}:/build -w /build'
-          run: ${{ matrix.settings.build }}
+        run: npm ci
       - name: Build
-        run: ${{ matrix.settings.build }}
-        if: ${{ !matrix.settings.docker }}
+        run: |-
+          set -e &&
+          npm run build &&
+          strip -x *.node
         shell: bash
+      - name: Test bindings
+        run: npm run test
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -99,98 +73,26 @@ jobs:
           path: ${{ env.APP_NAME }}.*.node
           if-no-files-found: error
 
-  test-macos-binding:
-    name: Test on ${{ matrix.settings.target }}
-    needs:
-      - build
-    strategy:
-      matrix:
-        settings:
-          - host: macos-14-large
-            target: x86_64-apple-darwin
-            architecture: x64
-    runs-on: ${{ matrix.settings.host }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v1
-        with:
-          bun-version: 1.1.6
-      - name: Setup node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          architecture: ${{ matrix.settings.architecture }}
-      - name: Install dependencies
-        run: bun install
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: bindings-${{ matrix.settings.target }}
-          path: .
-      - name: List packages
-        run: ls -R .
-        shell: bash
-      - name: Test bindings
-        run: npm run test:darwin
-
-  test-linux-binding:
-    name: Test on ${{ matrix.settings.target }}
-    needs:
-      - build
-    strategy:
-      matrix:
-        settings:
-          - host: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-    runs-on: ${{ matrix.settings.host }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v1
-        with:
-          bun-version: 1.1.6
-      - name: Setup node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-      - name: Install dependencies
-        run: bun install
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: bindings-${{ matrix.settings.target }}
-          path: .
-      - name: List packages
-        run: ls -R .
-        shell: bash
-      - name: Test bindings
-        run: docker run --rm -v $(pwd):/build -w /build oven/bun:1.1.6 bun test:linux
-
   publish:
     name: Publish
     runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
     needs:
-      - test-macos-binding
-      - test-linux-binding
+      - build-test
     steps:
       - uses: actions/checkout@v4
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v1
-        with:
-          bun-version: 1.1.6
       - name: Setup node
         uses: actions/setup-node@v4
         with:
           node-version: 20
       - name: Install dependencies
-        run: bun install
+        run: npm ci 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
       - name: Move artifacts
-        run: bun run artifacts
+        run: npm run artifacts
       - name: List packages
         run: ls -R ./npm
         shell: bash
