@@ -202,7 +202,7 @@ describe('PTY', () => {
     });
   }));
 
-  test.only('ordering is correct', () => new Promise<void>(done => {
+  test('ordering is correct', () => new Promise<void>(done => {
     const oldFds = getOpenFds();
     let buffer = Buffer.from('');
     const n = 1024;
