@@ -14,7 +14,7 @@ The biggest difference from existing PTY libraries is that this one works with B
 
 Following ["Publish It" section from `napi-rs` docs](https://napi.rs/docs/introduction/simple-package#publish-it):
 
-1. `git clean -f && bun install && npm run build`
+1. `git clean -f && npm install && npm run build`
 2. `npm version [major|minor|patch]`
 3. Send that as a Pull Request to GitHub. Ensure that the commit message consisting **only** of `x.y.z` - this is how the CI decides to publish to `npm`!
 
