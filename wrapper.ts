@@ -111,4 +111,8 @@ export class Pty {
   resize(size: Size) {
     this.#pty.resize(size);
   }
+
+  get pid() {
+    return this.#pty.pid;
+  }
 }
