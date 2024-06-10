@@ -11,9 +11,7 @@ type ExitResult = {
 }
 
 /**
- * A very thin wrapper around PTYs and processes. The caller is responsible for calling `.close()`
- * when all streams have been closed. We hold onto both ends of the PTY (controller and user) to
- * prevent reads from erroring out with EIO.
+ * A very thin wrapper around PTYs and processes.
  *
  * @example
  * const { Pty } = require('@replit/ruspty');

@@ -93,6 +93,8 @@ jobs:
           path: artifacts
       - name: Move artifacts
         run: npm run artifacts
+      - name: Build wrapper
+        run: npm run build:wrapper
       - name: List packages
         run: ls -R ./npm
         shell: bash
