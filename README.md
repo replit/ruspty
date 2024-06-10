@@ -1,14 +1,37 @@
 # `@replit/ruspty` - PTY for JavaScript through Rust FFI
 
-Running:
+A very thin wrapper around PTYs and processes.
+
+```ts
+const { Pty } = require('@replit/ruspty');
+const fs = require('fs');
+
+const pty = new Pty({
+  command: '/bin/sh',
+  args: [],
+  envs: {},
+  size: { rows: 24, cols: 80 },
+  onExit: (...result) => {
+    // TODO: Handle process exit.
+  },
+});
+
+const read = pty.read;
+const write = pty.write;
+
+read.on('data', (chunk) => {
+  // TODO: Handle data.
+});
+write.write('echo hello\n');
+```
+
+The biggest difference from existing PTY libraries is that this one works with Bun, and doesn't cross the FFI bridge for every input/output instead requiring the consumer to deal with the `fd` of the PTY.
+
+## Local Development
 
 - `npm install`
 - `npm run build`
 - `npm run test`
-
-The code mainly targets Node on Linux.
-
-The biggest difference from existing PTY libraries is that this one works with Bun, and doesn't cross the FFI bridge for every input/output instead requiring the consumer to deal with the `fd` of the PTY.
 
 ## Publishing
 
