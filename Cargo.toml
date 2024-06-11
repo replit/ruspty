@@ -12,7 +12,8 @@ libc = "0.2.152"
 # Default enable napi4 feature, see https://nodejs.org/api/n-api.html#node-api-version-matrix
 napi = { version = "2.12.2", default-features = false, features = ["napi4"] }
 napi-derive = "2.12.2"
-nix = { version = "0.29.0", features = ["fs", "term", "poll"] }
+rustix = { version = "0.38.34", features = ["event", "termios"] }
+rustix-openpty = "0.1.1"
 
 [build-dependencies]
 napi-build = "2.0.1"

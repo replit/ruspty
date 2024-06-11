@@ -208,7 +208,7 @@ describe('PTY', () => {
     const n = 1024;
     const pty = new Pty({
       command: '/bin/sh',
-      args: ['-c', `for i in $(seq 0 ${n}); do /bin/echo $i; done && exit`],
+      args: ['-c', `for i in $(seq 0 ${n}); do echo $i; done && exit`],
       onExit: (err, exitCode) => {
         expect(err).toBeNull();
         expect(exitCode).toBe(0);

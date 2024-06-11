@@ -1,19 +1,18 @@
 use backoff::backoff::Backoff;
 use backoff::ExponentialBackoffBuilder;
-use libc::{self, c_int};
 use napi::bindgen_prelude::JsFunction;
 use napi::threadsafe_function::{ErrorStrategy, ThreadsafeFunction, ThreadsafeFunctionCallMode};
 use napi::Status::GenericFailure;
 use napi::{self, Env};
-use nix::errno::Errno;
-use nix::poll::{poll, PollFd, PollFlags, PollTimeout};
-use nix::pty::{openpty, Winsize};
-use nix::sys::termios::{self, SetArg};
+use rustix::event::{poll, PollFd, PollFlags};
+use rustix::io::Errno;
+use rustix::termios::{self, InputModes, OptionalActions, Winsize};
+use rustix_openpty::openpty;
 use std::collections::HashMap;
 use std::io::Error;
 use std::io::ErrorKind;
 use std::os::fd::{AsRawFd, OwnedFd};
-use std::os::fd::{BorrowedFd, FromRawFd, RawFd};
+use std::os::fd::{FromRawFd, RawFd};
 use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
 use std::thread;
@@ -56,11 +55,9 @@ fn cast_to_napi_error(err: Errno) -> napi::Error {
 // if the child process exits before the controller fd is fully read, we might accidentally
 // end in a case where onExit is called but js hasn't had the chance to fully read the controller fd
 // let's wait until the controller fd is fully read before we call onExit
-fn poll_controller_fd_until_read(raw_fd: RawFd) {
+fn poll_controller_fd_until_read(controller_fd: OwnedFd) {
   // wait until fd is fully read (i.e. POLLIN no longer set)
-  let borrowed_fd = unsafe { BorrowedFd::borrow_raw(raw_fd) };
-  let poll_fd = PollFd::new(borrowed_fd, PollFlags::POLLIN);
-
+  let mut poll_fds = [PollFd::new(&controller_fd, PollFlags::IN)];
   let mut backoff = ExponentialBackoffBuilder::default()
     .with_initial_interval(Duration::from_millis(1))
     .with_max_interval(Duration::from_millis(100))
@@ -68,8 +65,8 @@ fn poll_controller_fd_until_read(raw_fd: RawFd) {
     .build();
 
   loop {
-    if let Err(err) = poll(&mut [poll_fd], PollTimeout::ZERO) {
-      if err == Errno::EINTR || err == Errno::EAGAIN {
+    if let Err(err) = poll(&mut poll_fds, 0) {
+      if err == Errno::INTR || err == Errno::AGAIN {
         // we were interrupted, so we should just try again
         continue;
       }
@@ -79,10 +76,9 @@ fn poll_controller_fd_until_read(raw_fd: RawFd) {
     }
 
     // check if POLLIN is no longer set (i.e. there is no more data to read)
-    if let Some(flags) = poll_fd.revents() {
-      if !flags.contains(PollFlags::POLLIN) {
-        break;
-      }
+    let flags = poll_fds[0].revents();
+    if !flags.contains(PollFlags::IN) {
+      break;
     }
 
     // wait for a bit before trying again
@@ -115,9 +111,9 @@ impl Pty {
     }
 
     // open pty pair
-    let pty_res = openpty(&window_size, None).map_err(cast_to_napi_error)?;
-    let controller_fd = pty_res.master;
-    let user_fd = pty_res.slave;
+    let pty_res = openpty(None, Some(&window_size)).map_err(cast_to_napi_error)?;
+    let controller_fd = pty_res.controller;
+    let user_fd = pty_res.user;
 
     // duplicate pty user_fd to be the child's stdin, stdout, and stderr
     cmd.stdin(Stdio::from(user_fd.try_clone()?));
@@ -160,8 +156,8 @@ impl Pty {
         // set input modes
         let user_fd = OwnedFd::from_raw_fd(raw_user_fd);
         if let Ok(mut termios) = termios::tcgetattr(&user_fd) {
-          termios.input_flags |= termios::InputFlags::IUTF8;
-          termios::tcsetattr(&user_fd, SetArg::TCSANOW, &termios)?;
+          termios.input_modes.set(InputModes::IUTF8, true);
+          termios::tcsetattr(&user_fd, OptionalActions::Now, &termios)?;
         }
 
         // reset signal handlers
@@ -200,8 +196,9 @@ impl Pty {
     thread::spawn(move || {
       let wait_result = child.wait();
 
-      // try to wait for the controller fd to be fully read 
-      poll_controller_fd_until_read(raw_controller_fd);
+      // try to wait for the controller fd to be fully read
+      let controller_fd = unsafe { OwnedFd::from_raw_fd(raw_controller_fd) };
+      poll_controller_fd_until_read(controller_fd);
 
       // we don't drop the controller fd immediately
       // let pty.close() be responsible for closing it
@@ -272,7 +269,7 @@ impl Pty {
   /// See the docstring of the class for an usage example.
   #[napi]
   #[allow(dead_code)]
-  pub fn fd(&mut self) -> Result<c_int, napi::Error> {
+  pub fn fd(&mut self) -> Result<RawFd, napi::Error> {
     if let Some(fd) = &self.controller_fd {
       Ok(fd.as_raw_fd())
     } else {

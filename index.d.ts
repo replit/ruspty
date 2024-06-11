@@ -27,7 +27,7 @@ export class Pty {
    * Returns a file descriptor for the PTY controller.
    * See the docstring of the class for an usage example.
    */
-  fd(): c_int
+  fd(): RawFd
   /**
    * Close the PTY file descriptor. This must be called when the readers / writers of the PTY have
    * been closed, otherwise we will leak file descriptors!
