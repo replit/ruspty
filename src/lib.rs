@@ -11,8 +11,8 @@ use rustix_openpty::openpty;
 use std::collections::HashMap;
 use std::io::Error;
 use std::io::ErrorKind;
+use std::os::fd::FromRawFd;
 use std::os::fd::{AsRawFd, OwnedFd};
-use std::os::fd::{FromRawFd, RawFd};
 use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
 use std::thread;
@@ -197,12 +197,12 @@ impl Pty {
       .on_exit
       .create_threadsafe_function(0, |ctx| ctx.env.create_int32(ctx.value).map(|v| vec![v]))?;
 
+    let cloned_controller_fd = controller_fd.try_clone()?;
     thread::spawn(move || {
       let wait_result = child.wait();
 
       // try to wait for the controller fd to be fully read
-      let controller_fd = unsafe { OwnedFd::from_raw_fd(raw_controller_fd) };
-      poll_controller_fd_until_read(controller_fd);
+      poll_controller_fd_until_read(cloned_controller_fd);
 
       // we don't drop the controller fd immediately
       // let pty.close() be responsible for closing it
@@ -273,7 +273,7 @@ impl Pty {
   /// See the docstring of the class for an usage example.
   #[napi]
   #[allow(dead_code)]
-  pub fn fd(&mut self) -> Result<RawFd, napi::Error> {
+  pub fn fd(&mut self) -> Result<i32, napi::Error> {
     if let Some(fd) = &self.controller_fd {
       Ok(fd.as_raw_fd())
     } else {
