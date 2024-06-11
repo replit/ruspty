@@ -65,6 +65,10 @@ fn poll_controller_fd_until_read(controller_fd: OwnedFd) {
     .build();
 
   loop {
+    for poll_fd in &mut poll_fds[..] {
+      poll_fd.clear_revents();
+    }
+
     if let Err(err) = poll(&mut poll_fds, 0) {
       if err == Errno::INTR || err == Errno::AGAIN {
         // we were interrupted, so we should just try again
