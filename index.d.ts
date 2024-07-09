@@ -17,6 +17,16 @@ export interface Size {
   cols: number
   rows: number
 }
+/**
+ * Set the close-on-exec flag on a file descriptor. This is `fcntl(fd, F_SETFD, FD_CLOEXEC)` under
+ * the covers.
+ */
+export function setCloseOnExec(fd: number, closeOnExec: boolean): void
+/**
+ * Get the close-on-exec flag on a file descriptor. This is `fcntl(fd, F_GETFD) & FD_CLOEXEC ==
+ *_CLOEXEC` under the covers.
+ */
+export function getCloseOnExec(fd: number): boolean
 export class Pty {
   /** The pid of the forked process. */
   pid: number

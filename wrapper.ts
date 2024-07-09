@@ -1,5 +1,10 @@
 import { PassThrough, Readable, Writable } from 'stream';
-import { Pty as RawPty, type Size } from './index.js';
+import {
+  Pty as RawPty,
+  type Size,
+  setCloseOnExec as rawSetCloseOnExec,
+  getCloseOnExec as rawGetCloseOnExec,
+} from './index.js';
 import { type PtyOptions as RawOptions } from './index.js';
 import fs from 'fs';
 
@@ -8,7 +13,7 @@ export type PtyOptions = RawOptions;
 type ExitResult = {
   error: NodeJS.ErrnoException | null;
   code: number;
-}
+};
 
 /**
  * A very thin wrapper around PTYs and processes.
@@ -48,14 +53,14 @@ export class Pty {
     let resolve: (value: ExitResult) => void;
     let exitResult: Promise<ExitResult> = new Promise((res) => {
       resolve = res;
-    })
+    });
     const mockedExit = (error: NodeJS.ErrnoException | null, code: number) => {
       resolve({ error, code });
-    }
+    };
 
     // when pty exits, we should wait until the fd actually ends (end OR error)
     // before closing the pty
-    // we use a mocked exit function to capture the exit result 
+    // we use a mocked exit function to capture the exit result
     // and then call the real exit function after the fd is fully read
     this.#pty = new RawPty({ ...options, onExit: mockedExit });
     const fd = this.#pty.fd();
@@ -79,10 +84,10 @@ export class Pty {
       exitResult.then((result) => realExit(result.error, result.code));
       this.#pty.close();
       userFacingRead.end();
-    }
+    };
 
     // catch end events
-    read.on('end', eof)
+    read.on('end', eof);
 
     // strip out EIO errors
     read.on('error', (err: NodeJS.ErrnoException) => {
@@ -116,3 +121,15 @@ export class Pty {
     return this.#pty.pid;
   }
 }
+
+/**
+ * Set the close-on-exec flag on a file descriptor. This is `fcntl(fd, F_SETFD, FD_CLOEXEC)` under
+ * the covers.
+ */
+export const setCloseOnExec = rawSetCloseOnExec;
+
+/**
+ * Get the close-on-exec flag on a file descriptor. This is `fcntl(fd, F_GETFD) & FD_CLOEXEC ==
+ * FD_CLOEXEC` under the covers.
+ */
+export const getCloseOnExec = rawGetCloseOnExec;

@@ -6,6 +6,7 @@ use napi::threadsafe_function::{ErrorStrategy, ThreadsafeFunction, ThreadsafeFun
 use napi::Status::GenericFailure;
 use napi::{self, Env};
 use nix::errno::Errno;
+use nix::fcntl::{fcntl, FcntlArg, FdFlag};
 use nix::poll::{poll, PollFd, PollFlags, PollTimeout};
 use nix::pty::{openpty, Winsize};
 use nix::sys::termios::{self, SetArg};
@@ -200,7 +201,7 @@ impl Pty {
     thread::spawn(move || {
       let wait_result = child.wait();
 
-      // try to wait for the controller fd to be fully read 
+      // try to wait for the controller fd to be fully read
       poll_controller_fd_until_read(raw_controller_fd);
 
       // we don't drop the controller fd immediately
@@ -300,5 +301,50 @@ impl Pty {
     }
 
     Ok(())
+  }
+}
+
+/// Set the close-on-exec flag on a file descriptor. This is `fcntl(fd, F_SETFD, FD_CLOEXEC)` under
+/// the covers.
+#[napi]
+#[allow(dead_code)]
+fn set_close_on_exec(fd: i32, close_on_exec: bool) -> Result<(), napi::Error> {
+  let old_flags = match fcntl(fd as RawFd, FcntlArg::F_GETFD) {
+    Ok(flags) => FdFlag::from_bits_truncate(flags),
+    Err(err) => {
+      return Err(napi::Error::new(
+        GenericFailure,
+        format!("fcntl F_GETFD: {}", err,),
+      ));
+    }
+  };
+  let mut new_flags = old_flags;
+  new_flags.set(FdFlag::FD_CLOEXEC, close_on_exec);
+  if old_flags == new_flags {
+    // It's already in the correct state!
+    return Ok(());
+  }
+
+  if let Err(err) = fcntl(fd as RawFd, FcntlArg::F_SETFD(new_flags)) {
+    return Err(napi::Error::new(
+      GenericFailure,
+      format!("fcntl F_SETFD: {}", err,),
+    ));
+  };
+
+  Ok(())
+}
+
+/// Get the close-on-exec flag on a file descriptor. This is `fcntl(fd, F_GETFD) & FD_CLOEXEC ==
+///_CLOEXEC` under the covers.
+#[napi]
+#[allow(dead_code)]
+fn get_close_on_exec(fd: i32) -> Result<bool, napi::Error> {
+  match fcntl(fd as RawFd, FcntlArg::F_GETFD) {
+    Ok(flags) => Ok(FdFlag::from_bits_truncate(flags).contains(FdFlag::FD_CLOEXEC)),
+    Err(err) => Err(napi::Error::new(
+      GenericFailure,
+      format!("fcntl F_GETFD: {}", err,),
+    )),
   }
 }
