@@ -1,3 +1,13 @@
+use std::collections::HashMap;
+use std::io::Error;
+use std::io::ErrorKind;
+use std::os::fd::{AsRawFd, OwnedFd};
+use std::os::fd::{BorrowedFd, FromRawFd, RawFd};
+use std::os::unix::process::CommandExt;
+use std::process::{Command, Stdio};
+use std::thread;
+use std::time::Duration;
+
 use backoff::backoff::Backoff;
 use backoff::ExponentialBackoffBuilder;
 use libc::{self, c_int};
@@ -10,15 +20,6 @@ use nix::fcntl::{fcntl, FcntlArg, FdFlag};
 use nix::poll::{poll, PollFd, PollFlags, PollTimeout};
 use nix::pty::{openpty, Winsize};
 use nix::sys::termios::{self, SetArg};
-use std::collections::HashMap;
-use std::io::Error;
-use std::io::ErrorKind;
-use std::os::fd::{AsRawFd, OwnedFd};
-use std::os::fd::{BorrowedFd, FromRawFd, RawFd};
-use std::os::unix::process::CommandExt;
-use std::process::{Command, Stdio};
-use std::thread;
-use std::time::Duration;
 
 #[macro_use]
 extern crate napi_derive;
@@ -115,10 +116,13 @@ impl Pty {
       cmd.args(args);
     }
 
-    // open pty pair
+    // open pty pair, and set close-on-exec to avoid unwanted copies of the FDs from finding their
+    // way into subprocesses.
     let pty_res = openpty(&window_size, None).map_err(cast_to_napi_error)?;
     let controller_fd = pty_res.master;
     let user_fd = pty_res.slave;
+    set_close_on_exec(controller_fd.as_raw_fd(), true)?;
+    set_close_on_exec(user_fd.as_raw_fd(), true)?;
 
     // duplicate pty user_fd to be the child's stdin, stdout, and stderr
     cmd.stdin(Stdio::from(user_fd.try_clone()?));
@@ -157,6 +161,16 @@ impl Pty {
         // we need to drop the controller fd, since we don't need it in the child
         // and it's not safe to keep it open
         libc::close(raw_controller_fd);
+
+        // just to be safe, mark every single file descriptor as close-on-exec.
+        // needs to use the raw syscall to avoid dependencies on newer versions of glibc.
+        #[cfg(target_os = "linux")]
+        libc::syscall(
+          libc::SYS_close_range,
+          3,
+          libc::c_uint::MAX,
+          libc::CLOSE_RANGE_CLOEXEC as c_int,
+        );
 
         // set input modes
         let user_fd = OwnedFd::from_raw_fd(raw_user_fd);

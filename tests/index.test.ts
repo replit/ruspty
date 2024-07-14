@@ -4,6 +4,9 @@ import { describe, test, expect } from 'vitest';
 
 const EOT = '\x04';
 const procSelfFd = '/proc/self/fd/';
+const IS_DARWIN = process.platform === 'darwin';
+
+const testSkipOnDarwin = IS_DARWIN ? test.skip : test;
 
 type FdRecord = Record<string, string>;
 function getOpenFds(): FdRecord {
@@ -17,7 +20,9 @@ function getOpenFds(): FdRecord {
       const linkTarget = readlinkSync(procSelfFd + filename);
       if (
         linkTarget === 'anon_inode:[timerfd]' ||
-        linkTarget.startsWith('socket:[')
+        linkTarget.startsWith('socket:[') ||
+        // node likes to asynchronously read stuff mid-test.
+        linkTarget.includes('/rustpy/')
       ) {
         continue;
       }
@@ -86,10 +91,9 @@ describe(
         let buffer = '';
 
         // We have local echo enabled, so we'll read the message twice.
-        const result =
-          process.platform === 'darwin'
-            ? 'hello cat\r\n^D\b\bhello cat\r\n'
-            : 'hello cat\r\nhello cat\r\n';
+        const result = IS_DARWIN
+          ? 'hello cat\r\n^D\b\bhello cat\r\n'
+          : 'hello cat\r\nhello cat\r\n';
 
         const pty = new Pty({
           command: '/bin/cat',
@@ -213,30 +217,86 @@ describe(
         });
       }));
 
-    test('ordering is correct', () =>
-      new Promise<void>((done) => {
-        const oldFds = getOpenFds();
-        let buffer = Buffer.from('');
-        const n = 1024;
-        const pty = new Pty({
-          command: '/bin/sh',
-          args: ['-c', `for i in $(seq 0 ${n}); do /bin/echo $i; done && exit`],
-          onExit: (err, exitCode) => {
-            expect(err).toBeNull();
-            expect(exitCode).toBe(0);
-            expect(buffer.toString().trim()).toBe(
-              [...Array(n + 1).keys()].join('\r\n'),
+    test(
+      'ordering is correct',
+      () =>
+        new Promise<void>((done) => {
+          const oldFds = getOpenFds();
+          let buffer = Buffer.from('');
+          const n = 1024;
+          const pty = new Pty({
+            command: '/bin/sh',
+            args: [
+              '-c',
+              `for i in $(seq 0 ${n}); do /bin/echo $i; done && exit`,
+            ],
+            onExit: (err, exitCode) => {
+              expect(err).toBeNull();
+              expect(exitCode).toBe(0);
+              expect(buffer.toString().trim()).toBe(
+                [...Array(n + 1).keys()].join('\r\n'),
+              );
+              expect(getOpenFds()).toStrictEqual(oldFds);
+              done();
+            },
+          });
+
+          const readStream = pty.read;
+          readStream.on('data', (data) => {
+            buffer = Buffer.concat([buffer, data]);
+          });
+        }),
+      { repeats: 1 },
+    );
+
+    testSkipOnDarwin(
+      'does not leak files',
+      () =>
+        new Promise<void>((done) => {
+          const oldFds = getOpenFds();
+          const promises = [];
+          for (let i = 0; i < 10; i++) {
+            promises.push(
+              new Promise<void>((accept) => {
+                let buffer = Buffer.from('');
+                const pty = new Pty({
+                  command: '/bin/sh',
+                  args: [
+                    '-c',
+                    'sleep 0.1 ; ls /proc/$$/fd',
+                  ],
+                  onExit: (err, exitCode) => {
+                    expect(err).toBeNull();
+                    expect(exitCode).toBe(0);
+                    expect(
+                      buffer
+                        .toString()
+                        .trim()
+                        .split(/\s+/)
+                        .filter((fd) => {
+                          // Some shells dup stdio to fd 255 for reasons.
+                          return fd !== '255';
+                        })
+                        .toSorted(),
+                    ).toStrictEqual(['0', '1', '2']);
+                    accept();
+                  },
+                });
+
+                const readStream = pty.read;
+                readStream.on('data', (data) => {
+                  buffer = Buffer.concat([buffer, data]);
+                });
+              }),
             );
+          }
+          Promise.allSettled(promises).then(() => {
             expect(getOpenFds()).toStrictEqual(oldFds);
             done();
-          },
-        });
-
-        const readStream = pty.read;
-        readStream.on('data', (data) => {
-          buffer = Buffer.concat([buffer, data]);
-        });
-      }));
+          });
+        }),
+      { repeats: 4 },
+    );
 
     test("doesn't break when executing non-existing binary", () =>
       new Promise<void>((done) => {
