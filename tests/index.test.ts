@@ -1,4 +1,5 @@
 import { Pty, getCloseOnExec, setCloseOnExec } from '../wrapper';
+import { type Writable } from 'stream';
 import { readdirSync, readlinkSync } from 'fs';
 import { describe, test, expect } from 'vitest';
 
@@ -19,10 +20,11 @@ function getOpenFds(): FdRecord {
     try {
       const linkTarget = readlinkSync(procSelfFd + filename);
       if (
-        linkTarget === 'anon_inode:[timerfd]' ||
+        linkTarget.startsWith('anon_inode:[') ||
         linkTarget.startsWith('socket:[') ||
         // node likes to asynchronously read stuff mid-test.
-        linkTarget.includes('/rustpy/')
+        linkTarget.includes('/ruspty/') ||
+        linkTarget === '/dev/null'
       ) {
         continue;
       }
@@ -91,16 +93,19 @@ describe(
         let buffer = '';
 
         // We have local echo enabled, so we'll read the message twice.
-        const result = IS_DARWIN
-          ? 'hello cat\r\n^D\b\bhello cat\r\n'
-          : 'hello cat\r\nhello cat\r\n';
+        const expectedResult = 'hello cat\r\nhello cat\r\n';
 
         const pty = new Pty({
           command: '/bin/cat',
           onExit: (err, exitCode) => {
             expect(err).toBeNull();
             expect(exitCode).toBe(0);
-            expect(buffer.trim()).toBe(result.trim());
+            let result = buffer.toString();
+            if (IS_DARWIN) {
+              // Darwin adds the visible EOT to the stream.
+              result = result.replace('^D\b\b', '');
+            }
+            expect(result.trim()).toStrictEqual(expectedResult.trim());
             expect(getOpenFds()).toStrictEqual(oldFds);
             done();
           },
@@ -261,10 +266,7 @@ describe(
                 let buffer = Buffer.from('');
                 const pty = new Pty({
                   command: '/bin/sh',
-                  args: [
-                    '-c',
-                    'sleep 0.1 ; ls /proc/$$/fd',
-                  ],
+                  args: ['-c', 'sleep 0.1 ; ls /proc/$$/fd'],
                   onExit: (err, exitCode) => {
                     expect(err).toBeNull();
                     expect(exitCode).toBe(0);
@@ -291,6 +293,72 @@ describe(
             );
           }
           Promise.allSettled(promises).then(() => {
+            expect(getOpenFds()).toStrictEqual(oldFds);
+            done();
+          });
+        }),
+      { repeats: 4 },
+    );
+
+    test(
+      'can run concurrent shells',
+      () =>
+        new Promise<void>((done) => {
+          const oldFds = getOpenFds();
+          const donePromises: Array<Promise<void>> = [];
+          const readyPromises: Array<Promise<void>> = [];
+          const writeStreams: Array<Writable> = [];
+
+          // We have local echo enabled, so we'll read the message twice.
+          const expectedResult = 'ready\r\nhello cat\r\nhello cat\r\n';
+
+          for (let i = 0; i < 10; i++) {
+            donePromises.push(
+              new Promise<void>((accept) => {
+                let buffer = Buffer.from('');
+                const pty = new Pty({
+                  command: '/bin/sh',
+                  args: ['-c', 'echo ready ; exec cat'],
+                  onExit: (err, exitCode) => {
+                    expect(err).toBeNull();
+                    expect(exitCode).toBe(0);
+                    let result = buffer.toString();
+                    if (IS_DARWIN) {
+                      // Darwin adds the visible EOT to the stream.
+                      result = result.replace('^D\b\b', '');
+                    }
+                    expect(result).toStrictEqual(expectedResult);
+                    accept();
+                  },
+                });
+
+                readyPromises.push(
+                  new Promise<void>((ready) => {
+                    let readyMessageReceived = false;
+                    const readStream = pty.read;
+                    readStream.on('data', (data) => {
+                      buffer = Buffer.concat([buffer, data]);
+                      if (!readyMessageReceived) {
+                        readyMessageReceived = true;
+                        ready();
+                      }
+                    });
+                  }),
+                );
+                writeStreams.push(pty.write);
+              }),
+            );
+          }
+          Promise.allSettled(readyPromises).then(() => {
+            // The message should end in newline so that the EOT can signal that the input has ended and not
+            // just the line.
+            const message = 'hello cat\n';
+            for (const writeStream of writeStreams) {
+              writeStream.write(message);
+              writeStream.end(EOT);
+            }
+          });
+          Promise.allSettled(donePromises).then(() => {
             expect(getOpenFds()).toStrictEqual(oldFds);
             done();
           });

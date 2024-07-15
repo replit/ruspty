@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::io::Error;
 use std::io::ErrorKind;
 use std::os::fd::{AsRawFd, OwnedFd};
-use std::os::fd::{BorrowedFd, FromRawFd, RawFd};
+use std::os::fd::{BorrowedFd, FromRawFd, IntoRawFd, RawFd};
 use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
 use std::thread;
@@ -16,7 +16,7 @@ use napi::threadsafe_function::{ErrorStrategy, ThreadsafeFunction, ThreadsafeFun
 use napi::Status::GenericFailure;
 use napi::{self, Env};
 use nix::errno::Errno;
-use nix::fcntl::{fcntl, FcntlArg, FdFlag};
+use nix::fcntl::{fcntl, FcntlArg, FdFlag, OFlag};
 use nix::poll::{poll, PollFd, PollFlags, PollTimeout};
 use nix::pty::{openpty, Winsize};
 use nix::sys::termios::{self, SetArg};
@@ -76,7 +76,8 @@ fn poll_controller_fd_until_read(raw_fd: RawFd) {
         continue;
       }
 
-      // we should never hit this, but if we do, we should just break out of the loop
+      // we should almost never hit this, but if we do, we should just break out of the loop. this
+      // can happen if Node destroys the terminal before waiting for the child process to go away.
       break;
     }
 
@@ -117,12 +118,14 @@ impl Pty {
     }
 
     // open pty pair, and set close-on-exec to avoid unwanted copies of the FDs from finding their
-    // way into subprocesses.
+    // way into subprocesses. Also set the nonblocking flag to avoid Node from consuming a full I/O
+    // thread for this.
     let pty_res = openpty(&window_size, None).map_err(cast_to_napi_error)?;
     let controller_fd = pty_res.master;
     let user_fd = pty_res.slave;
     set_close_on_exec(controller_fd.as_raw_fd(), true)?;
     set_close_on_exec(user_fd.as_raw_fd(), true)?;
+    set_nonblocking(controller_fd.as_raw_fd())?;
 
     // duplicate pty user_fd to be the child's stdin, stdout, and stderr
     cmd.stdin(Stdio::from(user_fd.try_clone()?));
@@ -254,42 +257,14 @@ impl Pty {
     })
   }
 
-  /// Resize the terminal.
+  /// Transfers ownership of the file descriptor for the PTY controller. This can only be called
+  /// once (it will error the second time). The caller is responsible for closing the file
+  /// descriptor.
   #[napi]
   #[allow(dead_code)]
-  pub fn resize(&mut self, size: Size) -> Result<(), napi::Error> {
-    let window_size = Winsize {
-      ws_col: size.cols,
-      ws_row: size.rows,
-      ws_xpixel: 0,
-      ws_ypixel: 0,
-    };
-
-    if let Some(fd) = &self.controller_fd {
-      let res = unsafe { libc::ioctl(fd.as_raw_fd(), libc::TIOCSWINSZ, &window_size as *const _) };
-      if res == -1 {
-        return Err(napi::Error::new(
-          napi::Status::GenericFailure,
-          format!("ioctl TIOCSWINSZ failed: {}", Error::last_os_error()),
-        ));
-      }
-
-      Ok(())
-    } else {
-      Err(napi::Error::new(
-        napi::Status::GenericFailure,
-        "ioctl TIOCSWINSZ failed: bad file descriptor (os error 9)",
-      ))
-    }
-  }
-
-  /// Returns a file descriptor for the PTY controller.
-  /// See the docstring of the class for an usage example.
-  #[napi]
-  #[allow(dead_code)]
-  pub fn fd(&mut self) -> Result<c_int, napi::Error> {
-    if let Some(fd) = &self.controller_fd {
-      Ok(fd.as_raw_fd())
+  pub fn take_fd(&mut self) -> Result<c_int, napi::Error> {
+    if let Some(fd) = self.controller_fd.take() {
+      Ok(fd.into_raw_fd())
     } else {
       Err(napi::Error::new(
         napi::Status::GenericFailure,
@@ -297,25 +272,28 @@ impl Pty {
       ))
     }
   }
+}
 
-  /// Close the PTY file descriptor. This must be called when the readers / writers of the PTY have
-  /// been closed, otherwise we will leak file descriptors!
-  ///
-  /// In an ideal world, this would be automatically called after the wait loop is done, but Node
-  /// doesn't like that one bit, since it implies that the file is closed outside of the main
-  /// event loop.
-  #[napi]
-  #[allow(dead_code)]
-  pub fn close(&mut self) -> Result<(), napi::Error> {
-    if let Some(fd) = self.controller_fd.take() {
-      unsafe {
-        // ok to best-effort close as node can also close this via autoClose
-        libc::close(fd.as_raw_fd());
-      };
-    }
+/// Resize the terminal.
+#[napi]
+#[allow(dead_code)]
+fn pty_resize(fd: i32, size: Size) -> Result<(), napi::Error> {
+  let window_size = Winsize {
+    ws_col: size.cols,
+    ws_row: size.rows,
+    ws_xpixel: 0,
+    ws_ypixel: 0,
+  };
 
-    Ok(())
+  let res = unsafe { libc::ioctl(fd, libc::TIOCSWINSZ, &window_size as *const _) };
+  if res == -1 {
+    return Err(napi::Error::new(
+      napi::Status::GenericFailure,
+      format!("ioctl TIOCSWINSZ failed: {}", Error::last_os_error()),
+    ));
   }
+
+  Ok(())
 }
 
 /// Set the close-on-exec flag on a file descriptor. This is `fcntl(fd, F_SETFD, FD_CLOEXEC)` under
@@ -361,4 +339,30 @@ fn get_close_on_exec(fd: i32) -> Result<bool, napi::Error> {
       format!("fcntl F_GETFD: {}", err,),
     )),
   }
+}
+
+/// Set the file descriptor to be non-blocking.
+#[allow(dead_code)]
+fn set_nonblocking(fd: i32) -> Result<(), napi::Error> {
+  let old_flags = match fcntl(fd, FcntlArg::F_GETFL) {
+    Ok(flags) => OFlag::from_bits_truncate(flags),
+    Err(err) => {
+      return Err(napi::Error::new(
+        GenericFailure,
+        format!("fcntl F_GETFL: {}", err),
+      ));
+    }
+  };
+
+  let mut new_flags = old_flags;
+  new_flags.set(OFlag::O_NONBLOCK, true);
+  if old_flags != new_flags {
+    if let Err(err) = fcntl(fd, FcntlArg::F_SETFL(new_flags)) {
+      return Err(napi::Error::new(
+        GenericFailure,
+        format!("fcntl F_SETFL: {}", err),
+      ));
+    }
+  }
+  Ok(())
 }
