@@ -17,6 +17,8 @@ export interface Size {
   cols: number
   rows: number
 }
+/** Resize the terminal. */
+export function ptyResize(fd: number, size: Size): void
 /**
  * Set the close-on-exec flag on a file descriptor. This is `fcntl(fd, F_SETFD, FD_CLOEXEC)` under
  * the covers.
@@ -27,24 +29,14 @@ export function setCloseOnExec(fd: number, closeOnExec: boolean): void
  *_CLOEXEC` under the covers.
  */
 export function getCloseOnExec(fd: number): boolean
-export declare class Pty {
+export class Pty {
   /** The pid of the forked process. */
   pid: number
   constructor(opts: PtyOptions)
-  /** Resize the terminal. */
-  resize(size: Size): void
   /**
-   * Returns a file descriptor for the PTY controller.
-   * See the docstring of the class for an usage example.
+   * Transfers ownership of the file descriptor for the PTY controller. This can only be called
+   * once (it will error the second time). The caller is responsible for closing the file
+   * descriptor.
    */
-  fd(): c_int
-  /**
-   * Close the PTY file descriptor. This must be called when the readers / writers of the PTY have
-   * been closed, otherwise we will leak file descriptors!
-   *
-   * In an ideal world, this would be automatically called after the wait loop is done, but Node
-   * doesn't like that one bit, since it implies that the file is closed outside of the main
-   * event loop.
-   */
-  close(): void
+  takeFd(): c_int
 }

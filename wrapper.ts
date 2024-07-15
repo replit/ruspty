@@ -1,12 +1,13 @@
-import { PassThrough, Readable, Writable } from 'stream';
+import { PassThrough, type Readable, type Writable } from 'node:stream';
+import { ReadStream } from 'node:tty';
 import {
   Pty as RawPty,
   type Size,
   setCloseOnExec as rawSetCloseOnExec,
   getCloseOnExec as rawGetCloseOnExec,
+  ptyResize,
 } from './index.js';
 import { type PtyOptions as RawOptions } from './index.js';
-import fs from 'fs';
 
 export type PtyOptions = RawOptions;
 
@@ -43,6 +44,8 @@ type ExitResult = {
  */
 export class Pty {
   #pty: RawPty;
+  #fd: number;
+  #socket: ReadStream;
 
   read: Readable;
   write: Writable;
@@ -63,58 +66,63 @@ export class Pty {
     // we use a mocked exit function to capture the exit result
     // and then call the real exit function after the fd is fully read
     this.#pty = new RawPty({ ...options, onExit: mockedExit });
-    const fd = this.#pty.fd();
+    // Transfer ownership of the FD to us.
+    this.#fd = this.#pty.takeFd();
 
-    const read = fs.createReadStream('', { fd, autoClose: false });
-    const write = fs.createWriteStream('', { fd, autoClose: false });
+    this.#socket = new ReadStream(this.#fd);
     const userFacingRead = new PassThrough();
     const userFacingWrite = new PassThrough();
-    read.pipe(userFacingRead);
-    userFacingWrite.pipe(write);
+    this.#socket.pipe(userFacingRead);
+    userFacingWrite.pipe(this.#socket);
     this.read = userFacingRead;
     this.write = userFacingWrite;
 
-    let eofCalled = false;
-    const eof = () => {
-      if (eofCalled) {
+    // catch end events
+    let handleCloseCalled = false;
+    const handleClose = () => {
+      if (handleCloseCalled) {
         return;
       }
 
-      eofCalled = true;
+      handleCloseCalled = true;
       exitResult.then((result) => realExit(result.error, result.code));
-      this.#pty.close();
       userFacingRead.end();
     };
+    this.#socket.on('close', handleClose);
 
-    // catch end events
-    read.on('end', eof);
-
-    // strip out EIO errors
-    read.on('error', (err: NodeJS.ErrnoException) => {
-      if (err.code && err.code.indexOf('EIO') !== -1) {
-        eof();
-        return;
+    // PTYs signal their donness with an EIO error. we therefore need to filter them out (as well as
+    // cleaning up other spurious errors) so that the user doesn't need to handle them and be in
+    // blissful peace.
+    const handleError = (err: NodeJS.ErrnoException) => {
+      if (err.code) {
+        const code = err.code;
+        if (code === 'EINTR' || code === 'EAGAIN') {
+          // these two are expected. EINTR happens when the kernel restarts a `read(2)`/`write(2)`
+          // syscall due to it being interrupted by another syscall, and EAGAIN happens when there
+          // is no more data to be read by the fd.
+          return;
+        }
+        if (code.indexOf('EIO') !== -1) {
+          // EIO only happens when the child dies . It is therefore our only true signal that there
+          // is nothing left to read and we can start tearing things down. If we hadn't received an
+          // error so far, we are considered to be in good standing.
+          this.#socket.off('error', handleError);
+          this.#socket.destroy();
+          return;
+        }
       }
 
       this.read.emit('error', err);
-    });
-
-    write.on('error', (err: NodeJS.ErrnoException) => {
-      if (err.code && err.code.indexOf('EIO') !== -1) {
-        eof();
-        return;
-      }
-
-      this.write.emit('error', err);
-    });
+    };
+    this.#socket.on('error', handleError);
   }
 
   close() {
-    this.#pty.close();
+    this.#socket.destroy();
   }
 
   resize(size: Size) {
-    this.#pty.resize(size);
+    ptyResize(this.#fd, size);
   }
 
   get pid() {
