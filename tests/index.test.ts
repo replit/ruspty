@@ -121,6 +121,34 @@ describe(
         writeStream.end(EOT);
       }));
 
+    test('can be started in non-interactive fashion', () =>
+      new Promise<void>((done) => {
+        const oldFds = getOpenFds();
+
+        let buffer = '';
+
+        const expectedResult = '\r\n';
+
+        const pty = new Pty({
+          command: '/bin/cat',
+          interactive: false,
+          onExit: (err, exitCode) => {
+            expect(err).toBeNull();
+            expect(exitCode).toBe(0);
+            let result = buffer.toString();
+            expect(result.trim()).toStrictEqual(expectedResult.trim());
+            expect(getOpenFds()).toStrictEqual(oldFds);
+            done();
+          },
+        });
+
+        const readStream = pty.read;
+
+        readStream.on('data', (data) => {
+          buffer += data.toString();
+        });
+      }));
+
     test('can be resized', () =>
       new Promise<void>((done) => {
         const oldFds = getOpenFds();

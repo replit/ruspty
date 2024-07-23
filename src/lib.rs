@@ -40,6 +40,7 @@ struct PtyOptions {
   pub envs: Option<HashMap<String, String>>,
   pub dir: Option<String>,
   pub size: Option<Size>,
+  pub interactive: Option<bool>,
   #[napi(ts_type = "(err: null | Error, exitCode: number) => void")]
   pub on_exit: JsFunction,
 }
@@ -128,7 +129,11 @@ impl Pty {
     set_nonblocking(controller_fd.as_raw_fd())?;
 
     // duplicate pty user_fd to be the child's stdin, stdout, and stderr
-    cmd.stdin(Stdio::from(user_fd.try_clone()?));
+    if opts.interactive.unwrap_or(true) {
+      cmd.stdin(Stdio::from(user_fd.try_clone()?));
+    } else {
+      cmd.stdin(Stdio::null());
+    }
     cmd.stderr(Stdio::from(user_fd.try_clone()?));
     cmd.stdout(Stdio::from(user_fd.try_clone()?));
 

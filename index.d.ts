@@ -10,6 +10,7 @@ export interface PtyOptions {
   envs?: Record<string, string>
   dir?: string
   size?: Size
+  interactive?: boolean
   onExit: (err: null | Error, exitCode: number) => void
 }
 /** A size struct to pass to resize. */
