@@ -8,8 +8,10 @@ import {
   ptyResize,
 } from './index.js';
 import { type PtyOptions as RawOptions } from './index.js';
+import { initLogging as rawInitLogging } from './index.js';
 
 export type PtyOptions = RawOptions;
+export const initLogging = rawInitLogging;
 
 type ExitResult = {
   error: NodeJS.ErrnoException | null;

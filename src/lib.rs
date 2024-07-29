@@ -21,8 +21,19 @@ use nix::poll::{poll, PollFd, PollFlags, PollTimeout};
 use nix::pty::{openpty, Winsize};
 use nix::sys::termios::{self, SetArg};
 
+use log::{info, warn, error};
+
+use env_logger;
+
+
 #[macro_use]
 extern crate napi_derive;
+
+#[napi]
+pub fn init_logging() {
+    env_logger::init();
+}
+
 
 #[napi]
 #[allow(dead_code)]
@@ -105,6 +116,7 @@ impl Pty {
   #[napi(constructor)]
   #[allow(dead_code)]
   pub fn new(_env: Env, opts: PtyOptions) -> Result<Self, napi::Error> {
+    info!("Creating new PTY with command: {}", opts.command);
     let size = opts.size.unwrap_or(Size { cols: 80, rows: 24 });
     let window_size = Winsize {
       ws_col: size.cols,
@@ -122,6 +134,7 @@ impl Pty {
     // way into subprocesses. Also set the nonblocking flag to avoid Node from consuming a full I/O
     // thread for this.
     let pty_res = openpty(&window_size, None).map_err(cast_to_napi_error)?;
+    info!("PTY pair opened successfully");
     let controller_fd = pty_res.master;
     let user_fd = pty_res.slave;
     set_close_on_exec(controller_fd.as_raw_fd(), true)?;
@@ -202,6 +215,7 @@ impl Pty {
     // actually spawn the child
     let mut child = cmd.spawn()?;
     let pid = child.id();
+    info!("Spawned child process with PID: {}", pid);
 
     // We're creating a new thread for every child, this uses a bit more system resources compared
     // to alternatives (below), trading off simplicity of implementation.
@@ -268,14 +282,23 @@ impl Pty {
   #[napi]
   #[allow(dead_code)]
   pub fn take_fd(&mut self) -> Result<c_int, napi::Error> {
-    if let Some(fd) = self.controller_fd.take() {
-      Ok(fd.into_raw_fd())
-    } else {
-      Err(napi::Error::new(
-        napi::Status::GenericFailure,
-        "fd failed: bad file descriptor (os error 9)",
-      ))
-    }
+      self.controller_fd.take().map(|fd| {
+          let raw_fd = fd.into_raw_fd();
+          info!("File descriptor {} taken from PTY", raw_fd);
+          raw_fd
+      }).ok_or_else(|| {
+          warn!("Attempt to take fd failed: fd already taken or never initialized");
+          napi::Error::new(
+              napi::Status::GenericFailure,
+              "File descriptor has already been taken or was never initialized",
+          )
+      })
+  }
+
+  /// useful method for checking the PTY state from the JavaScript side.
+  #[napi]
+  pub fn is_active(&self) -> bool {
+      self.controller_fd.is_some()
   }
 }
 
@@ -283,22 +306,24 @@ impl Pty {
 #[napi]
 #[allow(dead_code)]
 fn pty_resize(fd: i32, size: Size) -> Result<(), napi::Error> {
-  let window_size = Winsize {
-    ws_col: size.cols,
-    ws_row: size.rows,
-    ws_xpixel: 0,
-    ws_ypixel: 0,
-  };
-
-  let res = unsafe { libc::ioctl(fd, libc::TIOCSWINSZ, &window_size as *const _) };
-  if res == -1 {
-    return Err(napi::Error::new(
-      napi::Status::GenericFailure,
-      format!("ioctl TIOCSWINSZ failed: {}", Error::last_os_error()),
-    ));
-  }
-
-  Ok(())
+    info!("Attempting to resize PTY (fd: {}) to {}x{}", fd, size.cols, size.rows);
+    let window_size = Winsize {
+        ws_col: size.cols,
+        ws_row: size.rows,
+        ws_xpixel: 0,
+        ws_ypixel: 0,
+    };
+    let res = unsafe { libc::ioctl(fd, libc::TIOCSWINSZ, &window_size as *const _) };
+    if res == -1 {
+        let err = Error::last_os_error();
+        error!("Failed to resize PTY: {} (errno: {})", err, err.raw_os_error().unwrap_or(-1));
+        return Err(napi::Error::new(
+            napi::Status::GenericFailure,
+            format!("ioctl TIOCSWINSZ failed: {}", err),
+        ));
+    }
+    info!("Successfully resized PTY to {}x{}", size.cols, size.rows);
+    Ok(())
 }
 
 /// Set the close-on-exec flag on a file descriptor. This is `fcntl(fd, F_SETFD, FD_CLOEXEC)` under
@@ -306,6 +331,7 @@ fn pty_resize(fd: i32, size: Size) -> Result<(), napi::Error> {
 #[napi]
 #[allow(dead_code)]
 fn set_close_on_exec(fd: i32, close_on_exec: bool) -> Result<(), napi::Error> {
+  info!("Setting close-on-exec flag to {} for fd {}", close_on_exec, fd);
   let old_flags = match fcntl(fd as RawFd, FcntlArg::F_GETFD) {
     Ok(flags) => FdFlag::from_bits_truncate(flags),
     Err(err) => {
@@ -318,17 +344,19 @@ fn set_close_on_exec(fd: i32, close_on_exec: bool) -> Result<(), napi::Error> {
   let mut new_flags = old_flags;
   new_flags.set(FdFlag::FD_CLOEXEC, close_on_exec);
   if old_flags == new_flags {
-    // It's already in the correct state!
+    info!("Close-on-exec flag already in correct state for fd {}", fd);
     return Ok(());
   }
 
   if let Err(err) = fcntl(fd as RawFd, FcntlArg::F_SETFD(new_flags)) {
+    error!("Failed to set close-on-exec flag for fd {}: {}", fd, err);
     return Err(napi::Error::new(
       GenericFailure,
       format!("fcntl F_SETFD: {}", err,),
     ));
   };
 
+  info!("Successfully set close-on-exec flag for fd {}", fd);
   Ok(())
 }
 
@@ -349,6 +377,7 @@ fn get_close_on_exec(fd: i32) -> Result<bool, napi::Error> {
 /// Set the file descriptor to be non-blocking.
 #[allow(dead_code)]
 fn set_nonblocking(fd: i32) -> Result<(), napi::Error> {
+  info!("Setting fd {} to non-blocking mode", fd);
   let old_flags = match fcntl(fd, FcntlArg::F_GETFL) {
     Ok(flags) => OFlag::from_bits_truncate(flags),
     Err(err) => {
@@ -363,11 +392,13 @@ fn set_nonblocking(fd: i32) -> Result<(), napi::Error> {
   new_flags.set(OFlag::O_NONBLOCK, true);
   if old_flags != new_flags {
     if let Err(err) = fcntl(fd, FcntlArg::F_SETFL(new_flags)) {
+      error!("Failed to set fd {} to non-blocking mode: {}", fd, err);
       return Err(napi::Error::new(
         GenericFailure,
         format!("fcntl F_SETFL: {}", err),
       ));
     }
+    info!("Successfully set fd {} to non-blocking mode", fd);
   }
   Ok(())
 }

@@ -15,3 +15,7 @@ channel = "stable-23_11"
 
 [rules.formatter.fileExtensions.".ts"]
 id = "module:nodejs-20:v24-20240117-0bd73cd/formatter:prettier"
+
+[[ports]]
+localPort = 24678
+externalPort = 80

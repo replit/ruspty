@@ -32,6 +32,7 @@ The biggest difference from existing PTY libraries is that this one works with B
 - `npm install`
 - `npm run build`
 - `npm run test`
+- `RUST_LOG=debug npm run test` (Run tests with visible log statements)
 
 ## Publishing
 

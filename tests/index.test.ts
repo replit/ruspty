@@ -1,13 +1,22 @@
-import { Pty, getCloseOnExec, setCloseOnExec } from '../wrapper';
+import { Pty, getCloseOnExec, setCloseOnExec, initLogging} from '../wrapper';
 import { type Writable } from 'stream';
 import { readdirSync, readlinkSync } from 'fs';
-import { describe, test, expect } from 'vitest';
+import { describe, test, expect, beforeAll} from 'vitest';
 
 const EOT = '\x04';
 const procSelfFd = '/proc/self/fd/';
 const IS_DARWIN = process.platform === 'darwin';
 
 const testSkipOnDarwin = IS_DARWIN ? test.skip : test;
+
+
+beforeAll(() => {
+  // Initialize logging
+  initLogging();
+  // Set the log level to 'debug' to see all log messages
+  process.env.RUST_LOG = 'debug';
+});
+
 
 type FdRecord = Record<string, string>;
 function getOpenFds(): FdRecord {
