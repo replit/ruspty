@@ -268,14 +268,12 @@ impl Pty {
   #[napi]
   #[allow(dead_code)]
   pub fn take_fd(&mut self) -> Result<c_int, napi::Error> {
-    if let Some(fd) = self.controller_fd.take() {
-      Ok(fd.into_raw_fd())
-    } else {
-      Err(napi::Error::new(
-        napi::Status::GenericFailure,
-        "fd failed: bad file descriptor (os error 9)",
-      ))
-    }
+      self.controller_fd.take().map(|fd| fd.into_raw_fd()).ok_or_else(|| {
+          napi::Error::new(
+              napi::Status::GenericFailure,
+              "File descriptor has already been taken or was never initialized",
+          )
+      })
   }
 }
 
