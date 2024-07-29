@@ -40,4 +40,6 @@ export class Pty {
    * descriptor.
    */
   takeFd(): c_int
+  /** useful method for checking the PTY state from the JavaScript side. */
+  isActive(): boolean
 }

@@ -275,6 +275,12 @@ impl Pty {
           )
       })
   }
+
+  /// useful method for checking the PTY state from the JavaScript side.
+  #[napi]
+  pub fn is_active(&self) -> bool {
+      self.controller_fd.is_some()
+  }
 }
 
 /// Resize the terminal.
