@@ -371,3 +371,257 @@ fn set_nonblocking(fd: i32) -> Result<(), napi::Error> {
   }
   Ok(())
 }
+
+#[cfg(target_os = "linux")]
+use nix::sys::inotify::{AddWatchFlags, InitFlags};
+#[cfg(target_os = "linux")]
+use std::ffi::CString;
+
+/// A way to access Linux' `inotify(7)` subsystem. For simplicity, this only allows subscribing for
+/// events on directories (instead of files) and only for modify-close and rename events.
+#[napi]
+#[allow(dead_code)]
+struct Inotify {
+  fd: Option<OwnedFd>,
+}
+
+#[cfg(target_os = "linux")]
+#[napi]
+#[allow(dead_code)]
+impl Inotify {
+  #[napi(constructor)]
+  pub fn new() -> Result<Self, napi::Error> {
+    let fd = match Errno::result(unsafe {
+      libc::inotify_init1((InitFlags::IN_CLOEXEC | InitFlags::IN_NONBLOCK).bits())
+    }) {
+      Ok(fd) => unsafe { OwnedFd::from_raw_fd(fd) },
+      Err(err) => {
+        return Err(napi::Error::new(
+          GenericFailure,
+          format!("inotify_init: {}", err),
+        ));
+      }
+    };
+    Ok(Inotify { fd: Some(fd) })
+  }
+
+  /// Close the inotify file descriptor. Must be called at most once to avoid file descriptor
+  /// leaks.
+  #[napi]
+  #[allow(dead_code)]
+  pub fn close(&mut self) -> Result<(), napi::Error> {
+    let inotify = self.fd.take();
+    if inotify.is_none() {
+      return Err(napi::Error::new(
+        GenericFailure,
+        "inotify fd has already been closed",
+      ));
+    }
+
+    Ok(())
+  }
+
+  /// Borrow the file descriptor. It is expected that Nod does not close the file descriptor and
+  /// instead the .close() method should be called to clean the file descriptor up. Read the file
+  /// descriptor on node according to `inotify(7)` to get events.
+  #[napi]
+  #[allow(dead_code)]
+  pub fn fd(&self) -> Result<c_int, napi::Error> {
+    if let Some(fd) = &self.fd {
+      Ok(fd.as_raw_fd())
+    } else {
+      Err(napi::Error::new(
+        GenericFailure,
+        "inotify fd has already been closed",
+      ))
+    }
+  }
+
+  /// Register one directory to be watched. Events for close-after-write, renames, and deletions
+  /// will be registered. Events for creation and modification will be ignored. Returns a watch
+  /// descriptor, which can be used in `remove_watch`.
+  #[napi]
+  #[allow(dead_code)]
+  pub fn add_close_write(&self, dir: String) -> Result<i32, napi::Error> {
+    let cstring_dir = match CString::new(dir.as_str()) {
+      Ok(cstring_dir) => cstring_dir,
+      Err(err) => {
+        return Err(napi::Error::new(
+          GenericFailure,
+          format!("CString::new: {}", err),
+        ));
+      }
+    };
+    if let Some(fd) = &self.fd {
+      match Errno::result(unsafe {
+        libc::inotify_add_watch(
+          fd.as_raw_fd(),
+          cstring_dir.as_c_str().as_ptr(),
+          (AddWatchFlags::IN_CLOSE_WRITE | AddWatchFlags::IN_MOVED_TO | AddWatchFlags::IN_DELETE)
+            .bits(),
+        )
+      }) {
+        Ok(wd) => Ok(wd),
+        Err(err) => Err(napi::Error::new(
+          GenericFailure,
+          format!("inotify_add_watch: {}", err),
+        )),
+      }
+    } else {
+      Err(napi::Error::new(
+        GenericFailure,
+        "inotify fd has already been closed",
+      ))
+    }
+  }
+
+  /// Stop watching the watch descriptor provided.
+  #[napi]
+  #[allow(dead_code)]
+  pub fn remove_watch(&self, wd: i32) -> Result<(), napi::Error> {
+    if let Some(fd) = &self.fd {
+      if let Err(err) = Errno::result(unsafe { libc::inotify_rm_watch(fd.as_raw_fd(), wd) }) {
+        Err(napi::Error::new(
+          GenericFailure,
+          format!("inotify_remove_watch: {}", err),
+        ))
+      } else {
+        Ok(())
+      }
+    } else {
+      Err(napi::Error::new(
+        GenericFailure,
+        "inotify fd has already been closed",
+      ))
+    }
+  }
+}
+
+#[cfg(target_os = "linux")]
+#[napi]
+#[allow(dead_code)]
+pub const IN_CLOSE_WRITE: u32 = AddWatchFlags::IN_CLOSE_WRITE.bits();
+
+#[cfg(target_os = "linux")]
+#[napi]
+#[allow(dead_code)]
+pub const IN_MOVED_FROM: u32 = AddWatchFlags::IN_MOVED_FROM.bits();
+
+#[cfg(target_os = "linux")]
+#[napi]
+#[allow(dead_code)]
+pub const IN_MOVED_TO: u32 = AddWatchFlags::IN_MOVED_TO.bits();
+
+#[cfg(target_os = "linux")]
+#[napi]
+#[allow(dead_code)]
+pub const IN_CREATE: u32 = AddWatchFlags::IN_CREATE.bits();
+
+#[cfg(target_os = "linux")]
+#[napi]
+#[allow(dead_code)]
+pub const IN_DELETE: u32 = AddWatchFlags::IN_DELETE.bits();
+
+#[cfg(target_os = "linux")]
+#[napi]
+#[allow(dead_code)]
+pub const IN_IGNORED: u32 = AddWatchFlags::IN_IGNORED.bits();
+
+#[cfg(target_os = "linux")]
+#[napi]
+#[allow(dead_code)]
+pub const IN_Q_OVERFLOW: u32 = AddWatchFlags::IN_Q_OVERFLOW.bits();
+
+#[cfg(target_os = "linux")]
+#[napi]
+#[allow(dead_code)]
+pub const IN_UNMOUNT: u32 = AddWatchFlags::IN_UNMOUNT.bits();
+
+#[cfg(not(target_os = "linux"))]
+#[napi]
+impl Inotify {
+  #[napi(constructor)]
+  #[allow(dead_code)]
+  pub fn new() -> Result<Self, napi::Error> {
+    Err(napi::Error::new(
+      GenericFailure,
+      format!("inotify not supported in non-Linux"),
+    ))
+  }
+
+  #[napi]
+  #[allow(dead_code)]
+  pub fn close(&mut self) -> Result<(), napi::Error> {
+    Err(napi::Error::new(
+      GenericFailure,
+      format!("inotify not supported in non-Linux"),
+    ))
+  }
+
+  #[napi]
+  #[allow(dead_code)]
+  pub fn fd(&self) -> Result<c_int, napi::Error> {
+    Err(napi::Error::new(
+      GenericFailure,
+      format!("inotify not supported in non-Linux"),
+    ))
+  }
+
+  #[napi]
+  #[allow(dead_code)]
+  pub fn add_close_write(&self, dir: String) -> Result<i32, napi::Error> {
+    Err(napi::Error::new(
+      GenericFailure,
+      format!("inotify not supported in non-Linux"),
+    ))
+  }
+
+  #[napi]
+  #[allow(dead_code)]
+  pub fn remove_watch(&self, wd: i32) -> Result<(), napi::Error> {
+    Err(napi::Error::new(
+      GenericFailure,
+      format!("inotify not supported in non-Linux"),
+    ))
+  }
+}
+
+#[cfg(not(target_os = "linux"))]
+#[napi]
+#[allow(dead_code)]
+pub const IN_CLOSE_WRITE: u32 = 0;
+
+#[cfg(not(target_os = "linux"))]
+#[napi]
+#[allow(dead_code)]
+pub const IN_MOVED_FROM: u32 = 0;
+
+#[cfg(not(target_os = "linux"))]
+#[napi]
+#[allow(dead_code)]
+pub const IN_MOVED_TO: u32 = 0;
+
+#[cfg(not(target_os = "linux"))]
+#[napi]
+#[allow(dead_code)]
+pub const IN_CREATE: u32 = 0;
+
+#[cfg(not(target_os = "linux"))]
+#[napi]
+#[allow(dead_code)]
+pub const IN_DELETE: u32 = 0;
+
+#[cfg(not(target_os = "linux"))]
+#[napi]
+#[allow(dead_code)]
+pub const IN_IGNORED: u32 = 0;
+
+#[cfg(not(target_os = "linux"))]
+#[napi]
+#[allow(dead_code)]
+pub const IN_Q_OVERFLOW: u32 = 0;
+
+#[cfg(not(target_os = "linux"))]
+#[napi]
+#[allow(dead_code)]
+pub const IN_UNMOUNT: u32 = 0;
