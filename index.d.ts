@@ -19,17 +19,25 @@ export interface Size {
   rows: number
 }
 /** Resize the terminal. */
-export function ptyResize(fd: number, size: Size): void
+export declare function ptyResize(fd: number, size: Size): void
 /**
  * Set the close-on-exec flag on a file descriptor. This is `fcntl(fd, F_SETFD, FD_CLOEXEC)` under
  * the covers.
  */
-export function setCloseOnExec(fd: number, closeOnExec: boolean): void
+export declare function setCloseOnExec(fd: number, closeOnExec: boolean): void
 /**
  * Get the close-on-exec flag on a file descriptor. This is `fcntl(fd, F_GETFD) & FD_CLOEXEC ==
  *_CLOEXEC` under the covers.
  */
-export function getCloseOnExec(fd: number): boolean
+export declare function getCloseOnExec(fd: number): boolean
+export const IN_CLOSE_WRITE: number
+export const IN_MOVED_FROM: number
+export const IN_MOVED_TO: number
+export const IN_CREATE: number
+export const IN_DELETE: number
+export const IN_IGNORED: number
+export const IN_Q_OVERFLOW: number
+export const IN_UNMOUNT: number
 export class Pty {
   /** The pid of the forked process. */
   pid: number
@@ -40,4 +48,30 @@ export class Pty {
    * descriptor.
    */
   takeFd(): c_int
+}
+/**
+ * A way to access Linux' `inotify(7)` subsystem. For simplicity, this only allows subscribing for
+ * events on directories (instead of files) and only for modify-close and rename events.
+ */
+export class Inotify {
+  constructor()
+  /**
+   * Close the inotify file descriptor. Must be called at most once to avoid file descriptor
+   * leaks.
+   */
+  close(): void
+  /**
+   * Borrow the file descriptor. It is expected that Nod does not close the file descriptor and
+   * instead the .close() method should be called to clean the file descriptor up. Read the file
+   * descriptor on node according to `inotify(7)` to get events.
+   */
+  fd(): c_int
+  /**
+   * Register one directory to be watched. Events for close-after-write, renames, and deletions
+   * will be registered. Events for creation and modification will be ignored. Returns a watch
+   * descriptor, which can be used in `remove_watch`.
+   */
+  addCloseWrite(dir: string): number
+  /** Stop watching the watch descriptor provided. */
+  removeWatch(wd: number): void
 }

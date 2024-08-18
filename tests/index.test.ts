@@ -1,7 +1,9 @@
-import { Pty, getCloseOnExec, setCloseOnExec } from '../wrapper';
-import { type Writable } from 'stream';
-import { readdirSync, readlinkSync } from 'fs';
-import { describe, test, expect } from 'vitest';
+import { Pty, getCloseOnExec, setCloseOnExec, watch } from '../wrapper';
+import { type Writable } from 'node:stream';
+import { readdirSync, readlinkSync } from 'node:fs';
+import { mkdtemp, rm, writeFile, rename } from 'node:fs/promises';
+import { join } from 'node:path';
+import { beforeEach, afterEach, describe, test, expect, vi } from 'vitest';
 
 const EOT = '\x04';
 const procSelfFd = '/proc/self/fd/';
@@ -428,3 +430,114 @@ describe('setCloseOnExec', () => {
     setCloseOnExec(0, originalFlag);
   });
 });
+
+describe(
+  'watch',
+  () => {
+    let tmpdir: string;
+    beforeEach(async () => {
+      tmpdir = await mkdtemp('/tmp/inotify');
+    });
+    afterEach(async () => {
+      await rm(tmpdir, { recursive: true }).catch(() => {});
+    });
+
+    testSkipOnDarwin('can watch existent files', async () => {
+      const events: Array<'modify' | 'delete' | 'overflow'> = [];
+      const expectedEvents = ['modify'];
+      const fullPath = join(tmpdir, 'mycoolfile.txt');
+      await writeFile(fullPath, 'hi!');
+      const dispose = watch({
+        paths: [fullPath],
+        eventCallback: ({ path, kind }) => {
+          expect(path).toBe(fullPath);
+          events.push(kind);
+        },
+      });
+      try {
+        await writeFile(fullPath, 'bye!');
+
+        await vi.waitFor(() => {
+          expect(events).toEqual(expectedEvents);
+        });
+      } finally {
+        await dispose();
+      }
+      // Make sure that no events snuck in after we stopped the watcher.
+      expect(events).toEqual(expectedEvents);
+    });
+
+    testSkipOnDarwin('can watch inexistent files', async () => {
+      const events: Array<'modify' | 'delete' | 'overflow'> = [];
+      const expectedEvents = ['modify', 'modify'];
+      const fullPath = join(tmpdir, 'mycoolfile.txt');
+      const dispose = watch({
+        paths: [fullPath],
+        eventCallback: ({ path, kind }) => {
+          expect(path).toBe(fullPath);
+          events.push(kind);
+        },
+      });
+      try {
+        await writeFile(fullPath, 'hi!');
+        await writeFile(fullPath, 'bye!');
+
+        await vi.waitFor(() => {
+          expect(events).toEqual(expectedEvents);
+        });
+      } finally {
+        await dispose();
+      }
+      expect(events).toEqual(expectedEvents);
+    });
+
+    testSkipOnDarwin('ignores unrelated events', async () => {
+      const events: Array<'modify' | 'delete' | 'overflow'> = [];
+      const expectedEvents = ['modify'];
+      const fullPath = join(tmpdir, 'mycoolfile.txt');
+      const dispose = watch({
+        paths: [fullPath],
+        eventCallback: ({ path, kind }) => {
+          expect(path).toBe(fullPath);
+          events.push(kind);
+        },
+      });
+      try {
+        await writeFile(fullPath + '.2', 'hi!');
+        await writeFile(fullPath, 'bye!');
+
+        await vi.waitFor(() => {
+          expect(events).toEqual(expectedEvents);
+        });
+      } finally {
+        await dispose();
+      }
+      expect(events).toEqual(expectedEvents);
+    });
+
+    testSkipOnDarwin('handles atomic writes', async () => {
+      const events: Array<'modify' | 'delete' | 'overflow'> = [];
+      const expectedEvents = ['modify'];
+      const fullPath = join(tmpdir, 'mycoolfile.txt');
+      const dispose = watch({
+        paths: [fullPath],
+        eventCallback: ({ path, kind }) => {
+          expect(path).toBe(fullPath);
+          events.push(kind);
+        },
+      });
+      try {
+        await writeFile(fullPath + '.2', 'hi!');
+        await rename(fullPath + '.2', fullPath);
+
+        await vi.waitFor(() => {
+          expect(events).toEqual(expectedEvents);
+        });
+      } finally {
+        await dispose();
+      }
+      expect(events).toEqual(expectedEvents);
+    });
+  },
+  { repeats: 10 },
+);
