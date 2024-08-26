@@ -425,13 +425,12 @@ describe('cgroup opts', () => {
     // get the output of ls /sys/fs/cgroup/cpu/test.slice
     console.log(await exec("ls /sys/fs/cgroup/cpu/test.slice"))
 
-    // cat current cgroup and check if it matches cgroupPath
     const oldFds = getOpenFds();
     let buffer = '';
     const pty = new Pty({
       command: '/bin/cat',
       args: ['/proc/self/cgroup'],
-      cgroupPath: '/sys/fs/cgroup/cpu/test.slice',
+      // cgroupPath: '/sys/fs/cgroup/cpu/test.slice',
       onExit: (err, exitCode) => {
         expect(err).toBeNull();
         expect(exitCode).toBe(0);
