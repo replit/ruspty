@@ -425,9 +425,6 @@ describe('cgroup opts', () => {
     // Set permissions for the test user
     await exec("sudo chown -R $(id -u):$(id -g) /sys/fs/cgroup/cpu/test.slice")
 
-    // get the output of ls /sys/fs/cgroup/cpu/test.slice
-    console.log(await exec("ls /sys/fs/cgroup/cpu/test.slice"))
-
     return new Promise<void>((done) => {
       const oldFds = getOpenFds();
       let buffer = '';
