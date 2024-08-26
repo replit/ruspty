@@ -428,28 +428,28 @@ describe('cgroup opts', () => {
     // get the output of ls /sys/fs/cgroup/cpu/test.slice
     console.log(await exec("ls /sys/fs/cgroup/cpu/test.slice"))
 
-    const oldFds = getOpenFds();
-    let buffer = '';
-    console.log(1)
-    const pty = new Pty({
-      command: '/bin/cat',
-      args: ['/proc/self/cgroup'],
-      // cgroupPath: '/sys/fs/cgroup/cpu/test.slice',
-      onExit: (err, exitCode) => {
-        console.log(3)
-        expect(err).toBeNull();
-        expect(exitCode).toBe(0);
-        expect(buffer.trim()).toBe(pty.pid.toString());
-        expect(getOpenFds()).toStrictEqual(oldFds);
-      },
-    });
+    return new Promise<void>((done) => {
+      const oldFds = getOpenFds();
+      let buffer = '';
+      const pty = new Pty({
+        command: '/bin/cat',
+        args: ['/proc/self/cgroup'],
+        cgroupPath: '/sys/fs/cgroup/cpu/test.slice',
+        onExit: (err, exitCode) => {
+          expect(err).toBeNull();
+          expect(exitCode).toBe(0);
+          expect(buffer.trim()).toBe(pty.pid.toString());
+          expect(getOpenFds()).toStrictEqual(oldFds);
+          done();
+        },
+      });
 
-    const readStream = pty.read;
-    readStream.on('data', (data) => {
-      buffer = data.toString();
+      const readStream = pty.read;
+      readStream.on('data', (data) => {
+        buffer = data.toString();
+      });
     });
   });
-  console.log(2)
 });
 
 describe('setCloseOnExec', () => {
