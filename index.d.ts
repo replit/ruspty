@@ -10,6 +10,7 @@ export interface PtyOptions {
   envs?: Record<string, string>
   dir?: string
   size?: Size
+  cgroupPath?: string
   interactive?: boolean
   onExit: (err: null | Error, exitCode: number) => void
 }

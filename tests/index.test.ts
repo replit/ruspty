@@ -1,13 +1,17 @@
 import { Pty, getCloseOnExec, setCloseOnExec } from '../wrapper';
 import { type Writable } from 'stream';
 import { readdirSync, readlinkSync } from 'fs';
-import { describe, test, expect } from 'vitest';
+import { describe, test, expect, beforeEach, afterEach } from 'vitest';
+import { exec as execAsync } from 'child_process';
+import { promisify } from 'util';
+const exec = promisify(execAsync);
 
 const EOT = '\x04';
 const procSelfFd = '/proc/self/fd/';
 const IS_DARWIN = process.platform === 'darwin';
 
 const testSkipOnDarwin = IS_DARWIN ? test.skip : test;
+const testOnlyOnDarwin = IS_DARWIN ? test : test.skip;
 
 type FdRecord = Record<string, string>;
 function getOpenFds(): FdRecord {
@@ -413,6 +417,60 @@ describe(
   },
   { repeats: 50 },
 );
+
+describe('cgroup opts', () => {
+  beforeEach(async () => {
+    if (!IS_DARWIN) {
+      // create a new cgroup with the right permissions
+      await exec("sudo cgcreate -g 'cpu:/test.slice'")
+      await exec("sudo chown -R $(id -u):$(id -g) /sys/fs/cgroup/cpu/test.slice")
+    }
+  });
+
+  afterEach(async () => {
+    if (!IS_DARWIN) {
+      // remove the cgroup
+      await exec("sudo cgdelete cpu:/test.slice")
+    }
+  });
+
+  testSkipOnDarwin('basic cgroup', () => new Promise<void>((done) => {
+    const oldFds = getOpenFds();
+    let buffer = '';
+    const pty = new Pty({
+      command: '/bin/cat',
+      args: ['/proc/self/cgroup'],
+      cgroupPath: '/sys/fs/cgroup/cpu/test.slice',
+      onExit: (err, exitCode) => {
+        expect(err).toBeNull();
+        expect(exitCode).toBe(0);
+        expect(buffer).toContain('/test.slice');
+        expect(getOpenFds()).toStrictEqual(oldFds);
+        done();
+      },
+    });
+
+    const readStream = pty.read;
+    readStream.on('data', (data) => {
+      buffer = data.toString();
+    });
+  })
+  );
+
+  testOnlyOnDarwin('cgroup is not supported on darwin', () => {
+    expect(() => {
+      new Pty({
+        command: '/bin/cat',
+        args: ['/proc/self/cgroup'],
+        cgroupPath: '/sys/fs/cgroup/cpu/test.slice',
+        onExit: (err, exitCode) => {
+          expect(err).toBeNull();
+          expect(exitCode).toBe(0);
+        },
+      })
+    }).toThrowError();
+  });
+});
 
 describe('setCloseOnExec', () => {
   test('setCloseOnExec', () => {
