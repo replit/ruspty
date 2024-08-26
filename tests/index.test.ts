@@ -438,7 +438,7 @@ describe('cgroup opts', () => {
         onExit: (err, exitCode) => {
           expect(err).toBeNull();
           expect(exitCode).toBe(0);
-          expect(buffer.trim()).toBe(pty.pid.toString());
+          expect(buffer).toContain('/test.slice');
           expect(getOpenFds()).toStrictEqual(oldFds);
           done();
         },
