@@ -2,6 +2,7 @@ import { Pty, getCloseOnExec, setCloseOnExec } from '../wrapper';
 import { type Writable } from 'stream';
 import { readdirSync, readlinkSync } from 'fs';
 import { describe, test, expect } from 'vitest';
+import { exec } from 'child_process';
 
 const EOT = '\x04';
 const procSelfFd = '/proc/self/fd/';
@@ -416,17 +417,20 @@ describe(
 
 describe('cgroup opts', () => {
   testSkipOnDarwin('basic cgroup', () => {
+    // create a new cgroup
+    exec("sudo cgcreate -g 'cpu:/test.slice'")
+
     // cat current cgroup and check if it matches cgroupPath
     const oldFds = getOpenFds();
     let buffer = '';
     const pty = new Pty({
       command: '/bin/cat',
       args: ['/proc/self/cgroup'],
-      cgroupPath: '/sys/fs/cgroup/user.slice/test.slice',
+      cgroupPath: '/sys/fs/cgroup/cpu/test.slice',
       onExit: (err, exitCode) => {
         expect(err).toBeNull();
         expect(exitCode).toBe(0);
-        expect(buffer.trim()).toBe('1');
+        expect(buffer.trim()).toBe(pty.pid.toString());
         expect(getOpenFds()).toStrictEqual(oldFds);
       },
     });
