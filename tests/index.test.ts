@@ -11,6 +11,7 @@ const procSelfFd = '/proc/self/fd/';
 const IS_DARWIN = process.platform === 'darwin';
 
 const testSkipOnDarwin = IS_DARWIN ? test.skip : test;
+const testOnlyOnDarwin = IS_DARWIN ? test : test.skip;
 
 type FdRecord = Record<string, string>;
 function getOpenFds(): FdRecord {
@@ -419,10 +420,8 @@ describe(
 
 describe('cgroup opts', () => {
   testSkipOnDarwin('basic cgroup', async () => {
-    // create a new cgroup
+    // create a new cgroup with the right permissions
     await exec("sudo cgcreate -g 'cpu:/test.slice'")
-
-    // Set permissions for the test user
     await exec("sudo chown -R $(id -u):$(id -g) /sys/fs/cgroup/cpu/test.slice")
 
     return new Promise<void>((done) => {
@@ -446,6 +445,20 @@ describe('cgroup opts', () => {
         buffer = data.toString();
       });
     });
+  });
+
+  testOnlyOnDarwin('cgroup is not supported on darwin', () => {
+    expect(() => {
+      new Pty({
+        command: '/bin/cat',
+        args: ['/proc/self/cgroup'],
+        cgroupPath: '/sys/fs/cgroup/cpu/test.slice',
+        onExit: (err, exitCode) => {
+          expect(err).toBeNull();
+          expect(exitCode).toBe(0);
+        },
+      })
+    }).toThrowError();
   });
 });
 

@@ -164,11 +164,19 @@ impl Pty {
         }
 
         // set the cgroup if specified
+        #[cfg(target_os = "linux")]
         if let Some(cgroup_path) = &opts.cgroup_path {
           let pid = libc::getpid();
           let cgroup_path = format!("{}/cgroup.procs", cgroup_path);
           let mut cgroup_file = File::create(cgroup_path)?;
           cgroup_file.write_all(format!("{}", pid).as_bytes())?;
+        }
+        #[cfg(not(target_os = "linux"))]
+        if opts.cgroup_path.is_some() {
+          return Err(Error::new(
+            ErrorKind::Other,
+            "cgroup_path is only supported on Linux",
+          ));
         }
 
         // become the controlling tty for the program
