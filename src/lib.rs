@@ -110,8 +110,8 @@ impl Pty {
   pub fn new(_env: Env, opts: PtyOptions) -> Result<Self, napi::Error> {
     #[cfg(not(target_os = "linux"))]
     if opts.cgroup_path.is_some() {
-      return Err(Error::new(
-        ErrorKind::Other,
+      return Err(napi::Error::new(
+        napi::Status::GenericFailure,
         "cgroup_path is only supported on Linux",
       ));
     }
