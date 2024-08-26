@@ -2,7 +2,9 @@ import { Pty, getCloseOnExec, setCloseOnExec } from '../wrapper';
 import { type Writable } from 'stream';
 import { readdirSync, readlinkSync } from 'fs';
 import { describe, test, expect } from 'vitest';
-import { exec } from 'child_process';
+import { exec as execAsync } from 'child_process';
+import { promisify } from 'util';
+const exec = promisify(execAsync);
 
 const EOT = '\x04';
 const procSelfFd = '/proc/self/fd/';
@@ -416,9 +418,12 @@ describe(
 );
 
 describe('cgroup opts', () => {
-  testSkipOnDarwin('basic cgroup', () => {
+  testSkipOnDarwin('basic cgroup', async () => {
     // create a new cgroup
-    exec("sudo cgcreate -g 'cpu:/test.slice'")
+    await exec("sudo cgcreate -g 'cpu:/test.slice'")
+
+    // get the output of ls /sys/fs/cgroup/cpu/test.slice
+    console.log(await exec("ls /sys/fs/cgroup/cpu/test.slice"))
 
     // cat current cgroup and check if it matches cgroupPath
     const oldFds = getOpenFds();
