@@ -422,16 +422,21 @@ describe('cgroup opts', () => {
     // create a new cgroup
     await exec("sudo cgcreate -g 'cpu:/test.slice'")
 
+    // Set permissions for the test user
+    await exec("sudo chown -R $(id -u):$(id -g) /sys/fs/cgroup/cpu/test.slice")
+
     // get the output of ls /sys/fs/cgroup/cpu/test.slice
     console.log(await exec("ls /sys/fs/cgroup/cpu/test.slice"))
 
     const oldFds = getOpenFds();
     let buffer = '';
+    console.log(1)
     const pty = new Pty({
       command: '/bin/cat',
       args: ['/proc/self/cgroup'],
       // cgroupPath: '/sys/fs/cgroup/cpu/test.slice',
       onExit: (err, exitCode) => {
+        console.log(3)
         expect(err).toBeNull();
         expect(exitCode).toBe(0);
         expect(buffer.trim()).toBe(pty.pid.toString());
@@ -444,6 +449,7 @@ describe('cgroup opts', () => {
       buffer = data.toString();
     });
   });
+  console.log(2)
 });
 
 describe('setCloseOnExec', () => {
