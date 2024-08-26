@@ -1,6 +1,8 @@
 use std::collections::HashMap;
+use std::fs::File;
 use std::io::Error;
 use std::io::ErrorKind;
+use std::io::Write;
 use std::os::fd::{AsRawFd, OwnedFd};
 use std::os::fd::{BorrowedFd, FromRawFd, IntoRawFd, RawFd};
 use std::os::unix::process::CommandExt;
@@ -40,6 +42,7 @@ struct PtyOptions {
   pub envs: Option<HashMap<String, String>>,
   pub dir: Option<String>,
   pub size: Option<Size>,
+  pub cgroup_path: Option<String>,
   pub interactive: Option<bool>,
   #[napi(ts_type = "(err: null | Error, exitCode: number) => void")]
   pub on_exit: JsFunction,
@@ -158,6 +161,14 @@ impl Pty {
         let err = libc::setsid();
         if err == -1 {
           return Err(Error::new(ErrorKind::Other, "setsid"));
+        }
+
+        // set the cgroup if specified
+        if let Some(cgroup_path) = &opts.cgroup_path {
+          let pid = libc::getpid();
+          let cgroup_path = format!("{}/cgroup.procs", cgroup_path);
+          let mut cgroup_file = File::create(cgroup_path)?;
+          cgroup_file.write_all(format!("{}", pid).as_bytes())?;
         }
 
         // become the controlling tty for the program

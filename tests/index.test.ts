@@ -414,6 +414,30 @@ describe(
   { repeats: 50 },
 );
 
+describe('cgroup opts', () => {
+  testSkipOnDarwin('basic cgroup', () => {
+    // cat current cgroup and check if it matches cgroupPath
+    const oldFds = getOpenFds();
+    let buffer = '';
+    const pty = new Pty({
+      command: '/bin/cat',
+      args: ['/proc/self/cgroup'],
+      cgroupPath: '/sys/fs/cgroup/user.slice/test.slice',
+      onExit: (err, exitCode) => {
+        expect(err).toBeNull();
+        expect(exitCode).toBe(0);
+        expect(buffer.trim()).toBe('1');
+        expect(getOpenFds()).toStrictEqual(oldFds);
+      },
+    });
+
+    const readStream = pty.read;
+    readStream.on('data', (data) => {
+      buffer = data.toString();
+    });
+  });
+});
+
 describe('setCloseOnExec', () => {
   test('setCloseOnExec', () => {
     // stdio typically never has the close-on-exec flag since it's always expected to be
