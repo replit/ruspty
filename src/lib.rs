@@ -108,6 +108,14 @@ impl Pty {
   #[napi(constructor)]
   #[allow(dead_code)]
   pub fn new(_env: Env, opts: PtyOptions) -> Result<Self, napi::Error> {
+    #[cfg(not(target_os = "linux"))]
+    if opts.cgroup_path.is_some() {
+      return Err(Error::new(
+        ErrorKind::Other,
+        "cgroup_path is only supported on Linux",
+      ));
+    }
+
     let size = opts.size.unwrap_or(Size { cols: 80, rows: 24 });
     let window_size = Winsize {
       ws_col: size.cols,
@@ -170,13 +178,6 @@ impl Pty {
           let cgroup_path = format!("{}/cgroup.procs", cgroup_path);
           let mut cgroup_file = File::create(cgroup_path)?;
           cgroup_file.write_all(format!("{}", pid).as_bytes())?;
-        }
-        #[cfg(not(target_os = "linux"))]
-        if opts.cgroup_path.is_some() {
-          return Err(Error::new(
-            ErrorKind::Other,
-            "cgroup_path is only supported on Linux",
-          ));
         }
 
         // become the controlling tty for the program

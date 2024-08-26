@@ -419,33 +419,39 @@ describe(
 );
 
 describe('cgroup opts', () => {
-  testSkipOnDarwin('basic cgroup', async () => {
+  beforeAll(async () => {
     // create a new cgroup with the right permissions
     await exec("sudo cgcreate -g 'cpu:/test.slice'")
     await exec("sudo chown -R $(id -u):$(id -g) /sys/fs/cgroup/cpu/test.slice")
-
-    return new Promise<void>((done) => {
-      const oldFds = getOpenFds();
-      let buffer = '';
-      const pty = new Pty({
-        command: '/bin/cat',
-        args: ['/proc/self/cgroup'],
-        cgroupPath: '/sys/fs/cgroup/cpu/test.slice',
-        onExit: (err, exitCode) => {
-          expect(err).toBeNull();
-          expect(exitCode).toBe(0);
-          expect(buffer).toContain('/test.slice');
-          expect(getOpenFds()).toStrictEqual(oldFds);
-          done();
-        },
-      });
-
-      const readStream = pty.read;
-      readStream.on('data', (data) => {
-        buffer = data.toString();
-      });
-    });
   });
+
+  afterAll(async () => {
+    // remove the cgroup
+    await exec("sudo cgdelete cpu:/test.slice")
+  });
+
+  testSkipOnDarwin('basic cgroup', () => new Promise<void>((done) => {
+    const oldFds = getOpenFds();
+    let buffer = '';
+    const pty = new Pty({
+      command: '/bin/cat',
+      args: ['/proc/self/cgroup'],
+      cgroupPath: '/sys/fs/cgroup/cpu/test.slice',
+      onExit: (err, exitCode) => {
+        expect(err).toBeNull();
+        expect(exitCode).toBe(0);
+        expect(buffer).toContain('/test.slice');
+        expect(getOpenFds()).toStrictEqual(oldFds);
+        done();
+      },
+    });
+
+    const readStream = pty.read;
+    readStream.on('data', (data) => {
+      buffer = data.toString();
+    });
+  })
+  );
 
   testOnlyOnDarwin('cgroup is not supported on darwin', () => {
     expect(() => {
