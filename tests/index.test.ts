@@ -1,7 +1,7 @@
 import { Pty, getCloseOnExec, setCloseOnExec } from '../wrapper';
 import { type Writable } from 'stream';
 import { readdirSync, readlinkSync } from 'fs';
-import { describe, test, expect } from 'vitest';
+import { describe, test, expect, beforeAll, afterAll } from 'vitest';
 import { exec as execAsync } from 'child_process';
 import { promisify } from 'util';
 const exec = promisify(execAsync);
