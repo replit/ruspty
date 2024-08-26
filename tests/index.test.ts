@@ -1,7 +1,7 @@
 import { Pty, getCloseOnExec, setCloseOnExec } from '../wrapper';
 import { type Writable } from 'stream';
 import { readdirSync, readlinkSync } from 'fs';
-import { describe, test, expect, beforeAll, afterAll } from 'vitest';
+import { describe, test, expect, beforeEach, afterEach } from 'vitest';
 import { exec as execAsync } from 'child_process';
 import { promisify } from 'util';
 const exec = promisify(execAsync);
@@ -419,15 +419,19 @@ describe(
 );
 
 describe('cgroup opts', () => {
-  beforeAll(async () => {
-    // create a new cgroup with the right permissions
-    await exec("sudo cgcreate -g 'cpu:/test.slice'")
-    await exec("sudo chown -R $(id -u):$(id -g) /sys/fs/cgroup/cpu/test.slice")
+  beforeEach(async () => {
+    if (!IS_DARWIN) {
+      // create a new cgroup with the right permissions
+      await exec("sudo cgcreate -g 'cpu:/test.slice'")
+      await exec("sudo chown -R $(id -u):$(id -g) /sys/fs/cgroup/cpu/test.slice")
+    }
   });
 
-  afterAll(async () => {
-    // remove the cgroup
-    await exec("sudo cgdelete cpu:/test.slice")
+  afterEach(async () => {
+    if (!IS_DARWIN) {
+      // remove the cgroup
+      await exec("sudo cgdelete cpu:/test.slice")
+    }
   });
 
   testSkipOnDarwin('basic cgroup', () => new Promise<void>((done) => {
