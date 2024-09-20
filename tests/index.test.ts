@@ -254,6 +254,25 @@ describe(
         });
       }));
 
+    test('resize after exit shouldn\'t throw', () => new Promise<void>((done, reject) => {
+      const pty = new Pty({
+        command: '/bin/echo',
+        args: ['hello'],
+        onExit: (err, exitCode) => {
+          try {
+            expect(err).toBeNull();
+            expect(exitCode).toBe(0);
+            expect(() => {
+              pty.resize({ rows: 60, cols: 100 });
+            }).not.toThrow();
+            done();
+          } catch (e) {
+            reject(e)
+          }
+        },
+      });
+    }));
+
     test(
       'ordering is correct',
       () =>
