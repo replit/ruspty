@@ -45,6 +45,7 @@ type ExitResult = {
 export class Pty {
   #pty: RawPty;
   #fd: number;
+  #fdEnded: boolean = false;
   #socket: ReadStream;
 
   read: Readable;
@@ -78,13 +79,12 @@ export class Pty {
     this.write = userFacingWrite;
 
     // catch end events
-    let handleCloseCalled = false;
     const handleClose = () => {
-      if (handleCloseCalled) {
+      if (this.#fdEnded) {
         return;
       }
 
-      handleCloseCalled = true;
+      this.#fdEnded = true;
       exitResult.then((result) => realExit(result.error, result.code));
       userFacingRead.end();
     };
@@ -122,6 +122,10 @@ export class Pty {
   }
 
   resize(size: Size) {
+    if (this.#fdEnded) {
+      return;
+    }
+
     ptyResize(this.#fd, size);
   }
 
