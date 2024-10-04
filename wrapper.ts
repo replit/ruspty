@@ -120,6 +120,8 @@ export class Pty {
   }
 
   close() {
+    // end instead of destroy so that the user can read the last bits of data
+    // and allow graceful close event to mark the fd as ended
     this.#socket.end();
   }
 
@@ -136,7 +138,7 @@ export class Pty {
         // exited but we don't know about it yet. In that case, we just ignore the error.
         return;
       }
-      
+
       // otherwise, rethrow
       throw e;
     }
