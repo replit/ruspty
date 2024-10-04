@@ -128,7 +128,18 @@ export class Pty {
       return;
     }
 
-    ptyResize(this.#fd, size);
+    try {
+      ptyResize(this.#fd, size);
+    } catch (e: unknown) {
+      if (e instanceof Error && 'code' in e && e.code === 'EBADF') {
+        // EBADF means the file descriptor is invalid. This can happen if the PTY has already
+        // exited but we don't know about it yet. In that case, we just ignore the error.
+        return;
+      }
+      
+      // otherwise, rethrow
+      throw e;
+    }
   }
 
   get pid() {
