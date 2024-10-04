@@ -303,6 +303,14 @@ impl Pty {
 #[napi]
 #[allow(dead_code)]
 fn pty_resize(fd: i32, size: Size) -> Result<(), napi::Error> {
+  // check the fd is still valid before we try to resize
+  if unsafe { libc::fcntl(fd, libc::F_GETFD) } == -1 {
+    return Err(napi::Error::new(
+      napi::Status::GenericFailure,
+      "fd not valid for resize",
+    ));
+  }
+
   let window_size = Winsize {
     ws_col: size.cols,
     ws_row: size.rows,

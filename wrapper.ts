@@ -85,12 +85,14 @@ export class Pty {
       }
 
       this.#fdEnded = true;
-      exitResult.then((result) => realExit(result.error, result.code));
+      exitResult.then((result) => {
+        realExit(result.error, result.code)
+      });
       userFacingRead.end();
     };
     this.#socket.on('close', handleClose);
 
-    // PTYs signal their donness with an EIO error. we therefore need to filter them out (as well as
+    // PTYs signal their done-ness with an EIO error. we therefore need to filter them out (as well as
     // cleaning up other spurious errors) so that the user doesn't need to handle them and be in
     // blissful peace.
     const handleError = (err: NodeJS.ErrnoException) => {
@@ -103,11 +105,11 @@ export class Pty {
           return;
         }
         if (code.indexOf('EIO') !== -1) {
-          // EIO only happens when the child dies . It is therefore our only true signal that there
+          // EIO only happens when the child dies. It is therefore our only true signal that there
           // is nothing left to read and we can start tearing things down. If we hadn't received an
           // error so far, we are considered to be in good standing.
           this.#socket.off('error', handleError);
-          this.#socket.destroy();
+          this.#socket.end();
           return;
         }
       }
@@ -118,7 +120,7 @@ export class Pty {
   }
 
   close() {
-    this.#socket.destroy();
+    this.#socket.end();
   }
 
   resize(size: Size) {

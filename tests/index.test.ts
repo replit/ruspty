@@ -47,6 +47,7 @@ function getOpenFds(): FdRecord {
 
 describe(
   'PTY',
+  { repeats: 50 },
   () => {
     test('spawns and exits', () =>
       new Promise<void>((done) => {
@@ -273,6 +274,26 @@ describe(
       });
     }));
 
+    test('resize after close shouldn\'t throw', () => new Promise<void>((done, reject) => {
+      const pty = new Pty({
+        command: '/bin/sh',
+        onExit: (err, exitCode) => {
+          try {
+            expect(err).toBeNull();
+            expect(exitCode).toBe(0);
+          } catch (e) {
+            reject(e)
+          }
+        },
+      });
+
+      pty.close();
+      expect(() => {
+        pty.resize({ rows: 60, cols: 100 });
+      }).not.toThrow();
+      done();
+    }));
+
     test(
       'ordering is correct',
       () =>
@@ -302,11 +323,11 @@ describe(
             buffer = Buffer.concat([buffer, data]);
           });
         }),
-      { repeats: 1 },
     );
 
     testSkipOnDarwin(
       'does not leak files',
+      { repeats: 4 },
       () =>
         new Promise<void>((done) => {
           const oldFds = getOpenFds();
@@ -348,11 +369,11 @@ describe(
             done();
           });
         }),
-      { repeats: 4 },
     );
 
     test(
       'can run concurrent shells',
+      { repeats: 4 },
       () =>
         new Promise<void>((done) => {
           const oldFds = getOpenFds();
@@ -414,7 +435,6 @@ describe(
             done();
           });
         }),
-      { repeats: 4 },
     );
 
     test("doesn't break when executing non-existing binary", () =>
@@ -434,7 +454,6 @@ describe(
         }
       }));
   },
-  { repeats: 50 },
 );
 
 describe('cgroup opts', () => {
