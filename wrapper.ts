@@ -85,12 +85,14 @@ export class Pty {
       }
 
       this.#fdEnded = true;
-      exitResult.then((result) => realExit(result.error, result.code));
+      exitResult.then((result) => {
+        realExit(result.error, result.code)
+      });
       userFacingRead.end();
     };
     this.#socket.on('close', handleClose);
 
-    // PTYs signal their donness with an EIO error. we therefore need to filter them out (as well as
+    // PTYs signal their done-ness with an EIO error. we therefore need to filter them out (as well as
     // cleaning up other spurious errors) so that the user doesn't need to handle them and be in
     // blissful peace.
     const handleError = (err: NodeJS.ErrnoException) => {
@@ -103,11 +105,11 @@ export class Pty {
           return;
         }
         if (code.indexOf('EIO') !== -1) {
-          // EIO only happens when the child dies . It is therefore our only true signal that there
+          // EIO only happens when the child dies. It is therefore our only true signal that there
           // is nothing left to read and we can start tearing things down. If we hadn't received an
           // error so far, we are considered to be in good standing.
           this.#socket.off('error', handleError);
-          this.#socket.destroy();
+          this.#socket.end();
           return;
         }
       }
@@ -118,7 +120,9 @@ export class Pty {
   }
 
   close() {
-    this.#socket.destroy();
+    // end instead of destroy so that the user can read the last bits of data
+    // and allow graceful close event to mark the fd as ended
+    this.#socket.end();
   }
 
   resize(size: Size) {
@@ -126,7 +130,18 @@ export class Pty {
       return;
     }
 
-    ptyResize(this.#fd, size);
+    try {
+      ptyResize(this.#fd, size);
+    } catch (e: unknown) {
+      if (e instanceof Error && 'code' in e && e.code === 'EBADF') {
+        // EBADF means the file descriptor is invalid. This can happen if the PTY has already
+        // exited but we don't know about it yet. In that case, we just ignore the error.
+        return;
+      }
+
+      // otherwise, rethrow
+      throw e;
+    }
   }
 
   get pid() {
