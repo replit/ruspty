@@ -91,7 +91,7 @@ export class Pty {
     });
 
     // catch end events
-    const handleEnd = async () => {
+    const handleClose = async () => {
       if (this.#handledEndOfData) {
         return;
       }
@@ -112,7 +112,8 @@ export class Pty {
     });
 
     this.read.on('close', () => {
-      handleEnd();
+      console.log('close')
+      handleClose();
     });
 
     // PTYs signal their done-ness with an EIO error. we therefore need to filter them out (as well as
