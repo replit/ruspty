@@ -326,7 +326,7 @@ describe(
     );
 
     test('doesnt miss large output from fast commands',
-      { repeats: 10 },
+      { repeats: 50 },
       () =>
         new Promise<void>((done) => {
           const payload = `hello`.repeat(4096);

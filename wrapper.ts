@@ -71,12 +71,12 @@ export class Pty {
     this.#fd = this.#pty.takeFd();
 
     this.#socket = new ReadStream(this.#fd);
-    const userFacingRead = new PassThrough();
-    const userFacingWrite = new PassThrough();
-    this.#socket.pipe(userFacingRead);
-    userFacingWrite.pipe(this.#socket);
-    this.read = userFacingRead;
-    this.write = userFacingWrite;
+    // const userFacingRead = new PassThrough();
+    // const userFacingWrite = new PassThrough();
+    // this.#socket.pipe(userFacingRead);
+    // userFacingWrite.pipe(this.#socket);
+    this.read = this.#socket;
+    this.write = this.#socket;
 
     // catch end events
     const handleClose = () => {
@@ -88,7 +88,6 @@ export class Pty {
       exitResult.then((result) => {
         realExit(result.error, result.code)
       });
-      userFacingRead.end();
     };
     this.#socket.on('close', handleClose);
 
