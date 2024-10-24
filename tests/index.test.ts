@@ -414,15 +414,14 @@ describe(
           const writeStreams: Array<Writable> = [];
 
           // We have local echo enabled, so we'll read the message twice.
-          const expectedResult = 'ready\r\nhello cat\r\nhello cat\r\n';
+          const expectedResult = 'hello cat\r\nhello cat\r\n';
 
           for (let i = 0; i < 10; i++) {
             donePromises.push(
               new Promise<void>((accept) => {
                 let buffer = Buffer.from('');
                 const pty = new Pty({
-                  command: '/bin/sh',
-                  args: ['-c', 'echo ready ; exec cat'],
+                  command: '/bin/cat',
                   onExit: (err, exitCode) => {
                     expect(err).toBeNull();
                     expect(exitCode).toBe(0);
@@ -442,23 +441,21 @@ describe(
                     const readStream = pty.read;
                     readStream.on('data', (data) => {
                       buffer = Buffer.concat([buffer, data]);
-                      if (!readyMessageReceived) {
+                      if (buffer.toString().includes('hello cat\r\n') && !readyMessageReceived) {
                         readyMessageReceived = true;
                         ready();
                       }
                     });
                   }),
                 );
+
                 writeStreams.push(pty.write);
+                pty.write.write('hello cat\n');
               }),
             );
           }
           Promise.allSettled(readyPromises).then(() => {
-            // The message should end in newline so that the EOT can signal that the input has ended and not
-            // just the line.
-            const message = 'hello cat\n';
             for (const writeStream of writeStreams) {
-              writeStream.write(message);
               writeStream.end(EOT);
             }
           });
