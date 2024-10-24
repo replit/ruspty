@@ -1,7 +1,7 @@
 import { Pty, getCloseOnExec, setCloseOnExec } from '../wrapper';
 import { type Writable } from 'stream';
 import { readdirSync, readlinkSync } from 'fs';
-import { describe, test, expect, beforeEach, afterEach } from 'vitest';
+import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
 import { exec as execAsync } from 'child_process';
 import { promisify } from 'util';
 const exec = promisify(execAsync);
@@ -49,136 +49,120 @@ describe(
   'PTY',
   { repeats: 50 },
   () => {
-    test('spawns and exits', () =>
-      new Promise<void>((done) => {
-        const oldFds = getOpenFds();
-        const message = 'hello from a pty';
-        let buffer = '';
+    test('spawns and exits', async () => {
+      const oldFds = getOpenFds();
+      const message = 'hello from a pty';
+      let buffer = '';
 
-        const pty = new Pty({
-          command: '/bin/echo',
-          args: [message],
-          onExit: (err, exitCode) => {
-            expect(err).toBeNull();
-            expect(exitCode).toBe(0);
-            expect(buffer.trim()).toBe(message);
-            expect(getOpenFds()).toStrictEqual(oldFds);
-            done();
-          },
-        });
+      const onExit = vi.fn();
+      const pty = new Pty({
+        command: '/bin/echo',
+        args: [message],
+        onExit,
+      });
 
-        const readStream = pty.read;
-        readStream.on('data', (chunk) => {
-          buffer = chunk.toString();
-        });
-      }));
+      const readStream = pty.read;
+      readStream.on('data', (chunk) => {
+        buffer = chunk.toString();
+      });
 
-    test('captures an exit code', () =>
-      new Promise<void>((done) => {
-        const oldFds = getOpenFds();
-        const pty = new Pty({
-          command: '/bin/sh',
-          args: ['-c', 'exit 17'],
-          onExit: (err, exitCode) => {
-            expect(err).toBeNull();
-            expect(exitCode).toBe(17);
-            expect(getOpenFds()).toStrictEqual(oldFds);
-            done();
-          },
-        });
+      await vi.waitFor(() => expect(onExit).toHaveBeenCalledTimes(1));
+      expect(onExit).toHaveBeenCalledWith(null, 0);
+      expect(buffer.trim()).toBe(message);
+      expect(getOpenFds()).toStrictEqual(oldFds);
+    });
 
-        // set a pty reader so it can flow
-        pty.read.on('data', () => { });
-      }));
+    test('captures an exit code', async () => {
+      const oldFds = getOpenFds();
+      const onExit = vi.fn();
+      const pty = new Pty({
+        command: '/bin/sh',
+        args: ['-c', 'exit 17'],
+        onExit,
+      });
 
-    test('can be written to', () =>
-      new Promise<void>((done) => {
-        const oldFds = getOpenFds();
+      // set a pty reader so it can flow
+      pty.read.on('data', () => {});
 
-        // The message should end in newline so that the EOT can signal that the input has ended and not
-        // just the line.
-        const message = 'hello cat\n';
-        let buffer = '';
+      await vi.waitFor(() => expect(onExit).toHaveBeenCalledTimes(1));
+      expect(onExit).toHaveBeenCalledWith(null, 17);
+      expect(getOpenFds()).toStrictEqual(oldFds);
+    });
 
-        // We have local echo enabled, so we'll read the message twice.
-        const expectedResult = 'hello cat\r\nhello cat\r\n';
+    test('can be written to', async () => {
+      const oldFds = getOpenFds();
+      const message = 'hello cat\n';
+      let buffer = '';
+      const expectedResult = 'hello cat\r\nhello cat\r\n';
+      const onExit = vi.fn();
 
-        const pty = new Pty({
-          command: '/bin/cat',
-          onExit: (err, exitCode) => {
-            expect(err).toBeNull();
-            expect(exitCode).toBe(0);
-            let result = buffer.toString();
-            if (IS_DARWIN) {
-              // Darwin adds the visible EOT to the stream.
-              result = result.replace('^D\b\b', '');
-            }
-            expect(result.trim()).toStrictEqual(expectedResult.trim());
-            expect(getOpenFds()).toStrictEqual(oldFds);
-            done();
-          },
-        });
+      const pty = new Pty({
+        command: '/bin/cat',
+        onExit,
+      });
 
-        const writeStream = pty.write;
-        const readStream = pty.read;
+      const writeStream = pty.write;
+      const readStream = pty.read;
 
-        readStream.on('data', (data) => {
-          buffer += data.toString();
-        });
-        writeStream.write(message);
-        writeStream.end(EOT);
-      }));
+      readStream.on('data', (data) => {
+        buffer += data.toString();
+      });
+      
+      writeStream.write(message);
+      writeStream.end(EOT);
 
-    test('can be started in non-interactive fashion', () =>
-      new Promise<void>((done) => {
-        const oldFds = getOpenFds();
+      await vi.waitFor(() => expect(onExit).toHaveBeenCalledTimes(1));
+      expect(onExit).toHaveBeenCalledWith(null, 0);
+      
+      let result = buffer.toString();
+      if (IS_DARWIN) {
+        // Darwin adds the visible EOT to the stream.
+        result = result.replace('^D\b\b', '');
+      }
+      expect(result.trim()).toStrictEqual(expectedResult.trim());
+      expect(getOpenFds()).toStrictEqual(oldFds);
+    });
 
-        let buffer = '';
+    test('can be started in non-interactive fashion', async () => {
+      const oldFds = getOpenFds();
+      let buffer = '';
+      const expectedResult = '\r\n';
+      const onExit = vi.fn();
 
-        const expectedResult = '\r\n';
+      const pty = new Pty({
+        command: '/bin/cat',
+        interactive: false,
+        onExit,
+      });
 
-        const pty = new Pty({
-          command: '/bin/cat',
-          interactive: false,
-          onExit: (err, exitCode) => {
-            expect(err).toBeNull();
-            expect(exitCode).toBe(0);
-            let result = buffer.toString();
-            expect(result.trim()).toStrictEqual(expectedResult.trim());
-            expect(getOpenFds()).toStrictEqual(oldFds);
-            done();
-          },
-        });
+      const readStream = pty.read;
+      readStream.on('data', (data) => {
+        buffer += data.toString();
+      });
 
-        const readStream = pty.read;
+      await vi.waitFor(() => expect(onExit).toHaveBeenCalledTimes(1));
+      expect(onExit).toHaveBeenCalledWith(null, 0);
+      let result = buffer.toString();
+      expect(result.trim()).toStrictEqual(expectedResult.trim());
+      expect(getOpenFds()).toStrictEqual(oldFds);
+    });
 
-        readStream.on('data', (data) => {
-          buffer += data.toString();
-        });
-      }));
+    test('can be resized', async () => {
+      const oldFds = getOpenFds();
+      let buffer = '';
+      let state: 'expectPrompt' | 'expectDone1' | 'expectDone2' | 'done' = 'expectPrompt';
+      const onExit = vi.fn();
 
-    test('can be resized', () =>
-      new Promise<void>((done) => {
-        const oldFds = getOpenFds();
-        let buffer = '';
-        let state: 'expectPrompt' | 'expectDone1' | 'expectDone2' | 'done' =
-          'expectPrompt';
-        const pty = new Pty({
-          command: '/bin/sh',
-          size: { rows: 24, cols: 80 },
-          onExit: (err, exitCode) => {
-            expect(err).toBeNull();
-            expect(exitCode).toBe(0);
+      const pty = new Pty({
+        command: '/bin/sh',
+        size: { rows: 24, cols: 80 },
+        onExit,
+      });
 
-            expect(state).toBe('done');
-            expect(getOpenFds()).toStrictEqual(oldFds);
-            done();
-          },
-        });
+      const writeStream = pty.write;
+      const readStream = pty.read;
 
-        const writeStream = pty.write;
-        const readStream = pty.read;
-
+      const statePromise = new Promise<void>((resolve) => {
         readStream.on('data', (data) => {
           buffer += data.toString();
 
@@ -200,288 +184,267 @@ describe(
           if (state === 'expectDone2' && buffer.includes('done2\r\n')) {
             expect(buffer).toContain('60 100');
             state = 'done';
-
             writeStream.write(EOT);
-            return;
+            resolve();
           }
         });
-      }));
+      });
 
-    test('respects working directory', () =>
-      new Promise<void>((done) => {
-        const oldFds = getOpenFds();
-        const cwd = process.cwd();
-        let buffer = '';
+      await statePromise;
+      await vi.waitFor(() => expect(onExit).toHaveBeenCalledTimes(1));
+      expect(onExit).toHaveBeenCalledWith(null, 0);
+      expect(state).toBe('done');
+      expect(getOpenFds()).toStrictEqual(oldFds);
+    });
 
-        const pty = new Pty({
-          command: '/bin/pwd',
-          dir: cwd,
-          onExit: (err, exitCode) => {
-            expect(err).toBeNull();
-            expect(exitCode).toBe(0);
-            expect(buffer.trim()).toBe(cwd);
-            expect(getOpenFds()).toStrictEqual(oldFds);
-            done();
-          },
-        });
+    test('respects working directory', async () => {
+      const oldFds = getOpenFds();
+      const cwd = process.cwd();
+      let buffer = '';
+      const onExit = vi.fn();
 
-        const readStream = pty.read;
-        readStream.on('data', (data) => {
-          buffer += data.toString();
-        });
-      }));
+      const pty = new Pty({
+        command: '/bin/pwd',
+        dir: cwd,
+        onExit,
+      });
 
-    test('respects env', () =>
-      new Promise<void>((done) => {
-        const oldFds = getOpenFds();
-        const message = 'hello from env';
-        let buffer = '';
+      const readStream = pty.read;
+      readStream.on('data', (data) => {
+        buffer += data.toString();
+      });
 
-        const pty = new Pty({
-          command: '/bin/sh',
-          args: ['-c', 'echo $ENV_VARIABLE && exit'],
-          envs: {
-            ENV_VARIABLE: message,
-          },
-          onExit: (err, exitCode) => {
-            expect(err).toBeNull();
-            expect(exitCode).toBe(0);
-            expect(buffer.trim()).toBe(message);
-            expect(getOpenFds()).toStrictEqual(oldFds);
-            done();
-          },
-        });
+      await vi.waitFor(() => expect(onExit).toHaveBeenCalledTimes(1));
+      expect(onExit).toHaveBeenCalledWith(null, 0);
+      expect(buffer.trim()).toBe(cwd);
+      expect(getOpenFds()).toStrictEqual(oldFds);
+    });
 
-        const readStream = pty.read;
-        readStream.on('data', (data) => {
-          buffer += data.toString();
-        });
-      }));
+    test('respects env', async () => {
+      const oldFds = getOpenFds();
+      const message = 'hello from env';
+      let buffer = '';
+      const onExit = vi.fn();
 
-    test('resize after exit shouldn\'t throw', () => new Promise<void>((done, reject) => {
+      const pty = new Pty({
+        command: '/bin/sh',
+        args: ['-c', 'echo $ENV_VARIABLE && exit'],
+        envs: {
+          ENV_VARIABLE: message,
+        },
+        onExit,
+      });
+
+      const readStream = pty.read;
+      readStream.on('data', (data) => {
+        buffer += data.toString();
+      });
+
+      await vi.waitFor(() => expect(onExit).toHaveBeenCalledTimes(1));
+      expect(onExit).toHaveBeenCalledWith(null, 0);
+      expect(buffer.trim()).toBe(message);
+      expect(getOpenFds()).toStrictEqual(oldFds);
+    });
+
+    test('resize after exit shouldn\'t throw', async () => {
+      const onExit = vi.fn();
       const pty = new Pty({
         command: '/bin/echo',
         args: ['hello'],
-        onExit: (err, exitCode) => {
-          try {
-            expect(err).toBeNull();
-            expect(exitCode).toBe(0);
-            expect(() => {
-              pty.resize({ rows: 60, cols: 100 });
-            }).not.toThrow();
-            done();
-          } catch (e) {
-            reject(e)
-          }
-        },
+        onExit,
       });
 
-      pty.read.on('data', () => { });
-    }));
+      pty.read.on('data', () => {});
 
-    test('resize after close shouldn\'t throw', () => new Promise<void>((done, reject) => {
+      await vi.waitFor(() => expect(onExit).toHaveBeenCalledTimes(1));
+      expect(onExit).toHaveBeenCalledWith(null, 0);
+      expect(() => {
+        pty.resize({ rows: 60, cols: 100 });
+      }).not.toThrow();
+    });
+
+    test('resize after close shouldn\'t throw', async () => {
+      const onExit = vi.fn();
       const pty = new Pty({
         command: '/bin/sh',
-        onExit: (err, exitCode) => {
-          try {
-            expect(err).toBeNull();
-            expect(exitCode).toBe(0);
-          } catch (e) {
-            reject(e)
-          }
-        },
+        onExit,
       });
 
-      pty.read.on('data', () => { });
+      pty.read.on('data', () => {});
 
       pty.close();
       expect(() => {
         pty.resize({ rows: 60, cols: 100 });
       }).not.toThrow();
-      done();
-    }));
+      
+      await vi.waitFor(() => expect(onExit).toHaveBeenCalledTimes(1));
+      expect(onExit).toHaveBeenCalledWith(null, 0);
+    });
 
     test(
       'ordering is correct',
       { repeats: 100 },
-      () =>
-        new Promise<void>((done) => {
-          const oldFds = getOpenFds();
-          let buffer = Buffer.from('');
-          const n = 1024;
-          const pty = new Pty({
-            command: '/bin/sh',
-            args: [
-              '-c',
-              `seq 0 ${n}`
-            ],
-            onExit: (err, exitCode) => {
-              expect(err).toBeNull();
-              expect(exitCode).toBe(0);
-              expect(buffer.toString().trim().split('\n').map(Number)).toStrictEqual(
-                Array.from({ length: n + 1 }, (_, i) => i),
-              );
-              expect(getOpenFds()).toStrictEqual(oldFds);
-              done();
-            },
-          });
-
-          const readStream = pty.read;
-          readStream.on('data', (data) => {
-            buffer = Buffer.concat([buffer, data]);
-          });
-        }),
-    );
-
-    test('doesnt miss large output from fast commands',
-      () =>
-        new Promise<void>((done) => {
-          const payload = `hello`.repeat(4096);
-          let buffer = Buffer.from('');
-          const pty = new Pty({
-            command: '/bin/echo',
-            args: [
-              '-n',
-              payload
-            ],
-            onExit: (err, exitCode) => {
-              expect(err).toBeNull();
-              expect(exitCode).toBe(0);
-              expect(buffer.toString().length).toBe(payload.length);
-              done();
-            },
-          });
-
-          const readStream = pty.read;
-          readStream.on('data', (data) => {
-            buffer = Buffer.concat([buffer, data]);
-          });
-        })
-    );
-
-    testSkipOnDarwin(
-      'does not leak files',
-      () =>
-        new Promise<void>((done) => {
-          const oldFds = getOpenFds();
-          const promises = [];
-          for (let i = 0; i < 10; i++) {
-            promises.push(
-              new Promise<void>((accept) => {
-                let buffer = Buffer.from('');
-                const pty = new Pty({
-                  command: '/bin/sh',
-                  args: ['-c', 'sleep 0.1 ; ls /proc/$$/fd'],
-                  onExit: (err, exitCode) => {
-                    expect(err).toBeNull();
-                    expect(exitCode).toBe(0);
-                    expect(
-                      buffer
-                        .toString()
-                        .trim()
-                        .split(/\s+/)
-                        .filter((fd) => {
-                          // Some shells dup stdio to fd 255 for reasons.
-                          return fd !== '255';
-                        })
-                        .toSorted(),
-                    ).toStrictEqual(['0', '1', '2']);
-                    accept();
-                  },
-                });
-
-                const readStream = pty.read;
-                readStream.on('data', (data) => {
-                  buffer = Buffer.concat([buffer, data]);
-                });
-              }),
-            );
-          }
-          Promise.allSettled(promises).then(() => {
-            expect(getOpenFds()).toStrictEqual(oldFds);
-            done();
-          });
-        }),
-    );
-
-    test(
-      'can run concurrent shells',
-      () =>
-        new Promise<void>((done) => {
-          const oldFds = getOpenFds();
-          const donePromises: Array<Promise<void>> = [];
-          const readyPromises: Array<Promise<void>> = [];
-          const writeStreams: Array<Writable> = [];
-
-          // We have local echo enabled, so we'll read the message twice.
-          const expectedResult = 'hello cat\r\nhello cat\r\n';
-
-          for (let i = 0; i < 10; i++) {
-            donePromises.push(
-              new Promise<void>((accept) => {
-                let buffer = Buffer.from('');
-                const pty = new Pty({
-                  command: '/bin/cat',
-                  onExit: (err, exitCode) => {
-                    expect(err).toBeNull();
-                    expect(exitCode).toBe(0);
-                    let result = buffer.toString();
-                    if (IS_DARWIN) {
-                      // Darwin adds the visible EOT to the stream.
-                      result = result.replace('^D\b\b', '');
-                    }
-                    expect(result).toStrictEqual(expectedResult);
-                    accept();
-                  },
-                });
-
-                readyPromises.push(
-                  new Promise<void>((ready) => {
-                    let readyMessageReceived = false;
-                    const readStream = pty.read;
-                    readStream.on('data', (data) => {
-                      buffer = Buffer.concat([buffer, data]);
-                      if (buffer.toString().includes('hello cat\r\n') && !readyMessageReceived) {
-                        readyMessageReceived = true;
-                        ready();
-                      }
-                    });
-                  }),
-                );
-
-                writeStreams.push(pty.write);
-                pty.write.write('hello cat\n');
-              }),
-            );
-          }
-          Promise.allSettled(readyPromises).then(() => {
-            for (const writeStream of writeStreams) {
-              writeStream.end(EOT);
-            }
-          });
-          Promise.allSettled(donePromises).then(() => {
-            expect(getOpenFds()).toStrictEqual(oldFds);
-            done();
-          });
-        }),
-    );
-
-    test("doesn't break when executing non-existing binary", () =>
-      new Promise<void>((done) => {
+      async () => {
         const oldFds = getOpenFds();
-        try {
-          new Pty({
-            command: '/bin/this-does-not-exist',
-            onExit: () => {
-              expect(getOpenFds()).toStrictEqual(oldFds);
-            },
-          });
-        } catch (e: any) {
-          expect(e.message).toContain('No such file or directory');
+        let buffer = Buffer.from('');
+        const n = 1024;
+        const onExit = vi.fn();
 
-          done();
+        const pty = new Pty({
+          command: '/bin/sh',
+          args: [
+            '-c',
+            `seq 0 ${n}`
+          ],
+          onExit,
+        });
+
+        const readStream = pty.read;
+        readStream.on('data', (data) => {
+          buffer = Buffer.concat([buffer, data]);
+        });
+
+        await vi.waitFor(() => expect(onExit).toHaveBeenCalledTimes(1));
+        expect(onExit).toHaveBeenCalledWith(null, 0);
+        expect(buffer.toString().trim().split('\n').map(Number)).toStrictEqual(
+          Array.from({ length: n + 1 }, (_, i) => i),
+        );
+        expect(getOpenFds()).toStrictEqual(oldFds);
+      }
+    );
+
+    test('doesnt miss large output from fast commands', async () => {
+      const payload = `hello`.repeat(4096);
+      let buffer = Buffer.from('');
+      const onExit = vi.fn();
+
+      const pty = new Pty({
+        command: '/bin/echo',
+        args: [
+          '-n',
+          payload
+        ],
+        onExit,
+      });
+
+      const readStream = pty.read;
+      readStream.on('data', (data) => {
+        buffer = Buffer.concat([buffer, data]);
+      });
+
+      await vi.waitFor(() => expect(onExit).toHaveBeenCalledTimes(1));
+      expect(onExit).toHaveBeenCalledWith(null, 0);
+      expect(buffer.toString().length).toBe(payload.length);
+    });
+
+    testSkipOnDarwin('does not leak files', async () => {
+      const oldFds = getOpenFds();
+      const promises = [];
+      
+      for (let i = 0; i < 10; i++) {
+        const onExit = vi.fn();
+        let buffer = Buffer.from('');
+        
+        const pty = new Pty({
+          command: '/bin/sh',
+          args: ['-c', 'sleep 0.1 ; ls /proc/$$/fd'],
+          onExit,
+        });
+
+        const readStream = pty.read;
+        readStream.on('data', (data) => {
+          buffer = Buffer.concat([buffer, data]);
+        });
+
+        promises.push(
+          vi.waitFor(() => expect(onExit).toHaveBeenCalledTimes(1)).then(() => {
+            expect(onExit).toHaveBeenCalledWith(null, 0);
+            expect(
+              buffer
+                .toString()
+                .trim()
+                .split(/\s+/)
+                .filter((fd) => {
+                  // Some shells dup stdio to fd 255 for reasons.
+                  return fd !== '255';
+                })
+                .toSorted(),
+            ).toStrictEqual(['0', '1', '2']);
+          })
+        );
+      }
+
+      await Promise.all(promises);
+      expect(getOpenFds()).toStrictEqual(oldFds);
+    });
+
+    test('can run concurrent shells', async () => {
+      const oldFds = getOpenFds();
+      const writeStreams: Array<Writable> = [];
+      const buffers: Array<Buffer> = [];
+      const onExits: Array<vi.Mock> = [];
+      const expectedResult = 'hello cat\r\nhello cat\r\n';
+
+      // Create 10 concurrent shells
+      for (let i = 0; i < 10; i++) {
+        const onExit = vi.fn();
+        onExits.push(onExit);
+        buffers[i] = Buffer.from('');
+
+        const pty = new Pty({
+          command: '/bin/cat',
+          onExit,
+        });
+
+        const readStream = pty.read;
+        readStream.on('data', (data) => {
+          buffers[i] = Buffer.concat([buffers[i], data]);
+        });
+
+        writeStreams.push(pty.write);
+        pty.write.write('hello cat\n');
+      }
+
+      // Wait for initial output
+      await vi.waitFor(() => 
+        buffers.every(buffer => buffer.toString().includes('hello cat\r\n'))
+      );
+
+      // Send EOT to all shells
+      for (const writeStream of writeStreams) {
+        writeStream.end(EOT);
+      }
+
+      // Wait for all shells to exit
+      await Promise.all(onExits.map(onExit => 
+        vi.waitFor(() => expect(onExit).toHaveBeenCalledTimes(1))
+      ));
+
+      // Verify results
+      for (let i = 0; i < 10; i++) {
+        expect(onExits[i]).toHaveBeenCalledWith(null, 0);
+        let result = buffers[i].toString();
+        if (IS_DARWIN) {
+          result = result.replace('^D\b\b', '');
         }
-      }));
+        expect(result).toStrictEqual(expectedResult);
+      }
+
+      expect(getOpenFds()).toStrictEqual(oldFds);
+    });
+
+    test("doesn't break when executing non-existing binary", async () => {
+      const oldFds = getOpenFds();
+      
+      await expect(async () => {
+        new Pty({
+          command: '/bin/this-does-not-exist',
+          onExit: () => {},
+        });
+      }).rejects.toThrow('No such file or directory');
+
+      expect(getOpenFds()).toStrictEqual(oldFds);
+    });
   },
 );
 
@@ -489,52 +452,49 @@ describe('cgroup opts', () => {
   beforeEach(async () => {
     if (!IS_DARWIN) {
       // create a new cgroup with the right permissions
-      await exec("sudo cgcreate -g 'cpu:/test.slice'")
-      await exec("sudo chown -R $(id -u):$(id -g) /sys/fs/cgroup/cpu/test.slice")
+      await exec("sudo cgcreate -g 'cpu:/test.slice'");
+      await exec("sudo chown -R $(id -u):$(id -g) /sys/fs/cgroup/cpu/test.slice");
     }
   });
 
   afterEach(async () => {
     if (!IS_DARWIN) {
       // remove the cgroup
-      await exec("sudo cgdelete cpu:/test.slice")
+      await exec("sudo cgdelete cpu:/test.slice");
     }
   });
 
-  testSkipOnDarwin('basic cgroup', () => new Promise<void>((done) => {
+  testSkipOnDarwin('basic cgroup', async () => {
     const oldFds = getOpenFds();
     let buffer = '';
+    const onExit = vi.fn();
+
     const pty = new Pty({
       command: '/bin/cat',
       args: ['/proc/self/cgroup'],
       cgroupPath: '/sys/fs/cgroup/cpu/test.slice',
-      onExit: (err, exitCode) => {
-        expect(err).toBeNull();
-        expect(exitCode).toBe(0);
-        expect(buffer).toContain('/test.slice');
-        expect(getOpenFds()).toStrictEqual(oldFds);
-        done();
-      },
+      onExit,
     });
 
     const readStream = pty.read;
     readStream.on('data', (data) => {
       buffer = data.toString();
     });
-  })
-  );
 
-  testOnlyOnDarwin('cgroup is not supported on darwin', () => {
+    await vi.waitFor(() => expect(onExit).toHaveBeenCalledTimes(1));
+    expect(onExit).toHaveBeenCalledWith(null, 0);
+    expect(buffer).toContain('/test.slice');
+    expect(getOpenFds()).toStrictEqual(oldFds);
+  });
+
+  testOnlyOnDarwin('cgroup is not supported on darwin', async () => {
     expect(() => {
       new Pty({
         command: '/bin/cat',
         args: ['/proc/self/cgroup'],
         cgroupPath: '/sys/fs/cgroup/cpu/test.slice',
-        onExit: (err, exitCode) => {
-          expect(err).toBeNull();
-          expect(exitCode).toBe(0);
-        },
-      })
+        onExit: vi.fn(),
+      });
     }).toThrowError();
   });
 });
