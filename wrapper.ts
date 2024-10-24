@@ -58,6 +58,7 @@ export class Pty {
       resolve = res;
     });
     const mockedExit = (error: NodeJS.ErrnoException | null, code: number) => {
+      console.log('mocked exit')
       resolve({ error, code });
     };
 
@@ -88,6 +89,7 @@ export class Pty {
 
       ttyStreamEnded = true;
       exitResult.then((result) => {
+        console.log('calling real exit')
         realExit(result.error, result.code)
       });
     }
