@@ -1,7 +1,7 @@
 import { Pty, getCloseOnExec, setCloseOnExec } from '../wrapper';
 import { type Writable } from 'stream';
 import { readdirSync, readlinkSync } from 'fs';
-import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, test, expect, beforeEach, afterEach, vi, type Mock } from 'vitest';
 import { exec as execAsync } from 'child_process';
 import { promisify } from 'util';
 const exec = promisify(execAsync);
@@ -93,7 +93,6 @@ describe(
       const oldFds = getOpenFds();
       const message = 'hello cat\n';
       let buffer = '';
-      const expectedResult = 'hello cat\r\nhello cat\r\n';
       const onExit = vi.fn();
 
       const pty = new Pty({
@@ -119,6 +118,8 @@ describe(
         // Darwin adds the visible EOT to the stream.
         result = result.replace('^D\b\b', '');
       }
+
+      const expectedResult = 'hello cat\r\nhello cat\r\n';
       expect(result.trim()).toStrictEqual(expectedResult.trim());
       expect(getOpenFds()).toStrictEqual(oldFds);
     });
@@ -126,7 +127,6 @@ describe(
     test('can be started in non-interactive fashion', async () => {
       const oldFds = getOpenFds();
       let buffer = '';
-      const expectedResult = '\r\n';
       const onExit = vi.fn();
 
       const pty = new Pty({
@@ -143,6 +143,7 @@ describe(
       await vi.waitFor(() => expect(onExit).toHaveBeenCalledTimes(1));
       expect(onExit).toHaveBeenCalledWith(null, 0);
       let result = buffer.toString();
+      const expectedResult = '\r\n';
       expect(result.trim()).toStrictEqual(expectedResult.trim());
       expect(getOpenFds()).toStrictEqual(oldFds);
     });
@@ -383,7 +384,7 @@ describe(
       const oldFds = getOpenFds();
       const writeStreams: Array<Writable> = [];
       const buffers: Array<Buffer> = [];
-      const onExits: Array<vi.Mock> = [];
+      const onExits: Array<Mock> = [];
       const expectedResult = 'hello cat\r\nhello cat\r\n';
 
       // Create 10 concurrent shells
