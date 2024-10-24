@@ -50,11 +50,15 @@ export class Pty {
   #handledEndOfData: boolean = false;
 
   #socket: ReadStream;
+  #writable: Writable;
+
   get read(): Readable {
     return this.#socket;
   }
 
-  write: Writable;
+  get write(): Writable {
+    return this.#writable;
+  }
 
   constructor(options: PtyOptions) {
     const realExit = options.onExit;
@@ -79,8 +83,8 @@ export class Pty {
     // Transfer ownership of the FD to us.
     this.#fd = this.#pty.takeFd();
 
-    this.#socket = new ReadStream(this.#fd)
-    this.write = new Writable({
+    this.#socket = new ReadStream(this.#fd);
+    this.#writable = new Writable({
       write: this.#socket.write.bind(this.#socket),
     });
 
@@ -95,8 +99,8 @@ export class Pty {
       // must wait for fd close and exit result before calling real exit
       await fdClosed;
       const result = await exitResult;
-      realExit(result.error, result.code)
-    }
+      realExit(result.error, result.code);
+    };
 
     this.read.on('end', handleEnd);
     this.read.on('close', () => {

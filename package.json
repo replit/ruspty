@@ -44,6 +44,6 @@
     "universal": "napi universal",
     "version": "napi version",
     "release": "npm publish --access public",
-    "format": "npx prettier *.ts,*.js --write"
+    "format": "npx prettier *.{js,ts} --write"
   }
 }
