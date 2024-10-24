@@ -97,7 +97,7 @@ export class Pty {
       realExit(result.error, result.code)
     }
 
-    this.read.on('finish', handleEnd);
+    this.read.on('end', handleEnd);
     this.read.on('close', () => {
       markFdClosed();
     });
