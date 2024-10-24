@@ -45,18 +45,16 @@ type ExitResult = {
 export class Pty {
   #pty: RawPty;
   #fd: number;
-  #fdEnded: boolean = false;
+
+  #handledClose: boolean = false;
+  #handledEndOfData: boolean = false;
 
   #socket: ReadStream;
   get read(): Readable {
     return this.#socket;
   }
 
-  get write(): Writable {
-    return new Writable({
-      write: this.#socket.write.bind(this.#socket),
-    });
-  }
+  write: Writable;
 
   constructor(options: PtyOptions) {
     const realExit = options.onExit;
@@ -82,14 +80,17 @@ export class Pty {
     this.#fd = this.#pty.takeFd();
 
     this.#socket = new ReadStream(this.#fd)
+    this.write = new Writable({
+      write: this.#socket.write.bind(this.#socket),
+    });
 
     // catch end events
     const handleEnd = async () => {
-      if (this.#fdEnded) {
+      if (this.#handledEndOfData) {
         return;
       }
 
-      this.#fdEnded = true;
+      this.#handledEndOfData = true;
 
       // must wait for fd close and exit result before calling real exit
       await fdClosed;
@@ -129,13 +130,15 @@ export class Pty {
   }
 
   close() {
+    this.#handledClose = true;
+
     // end instead of destroy so that the user can read the last bits of data
     // and allow graceful close event to mark the fd as ended
     this.#socket.end();
   }
 
   resize(size: Size) {
-    if (this.#fdEnded) {
+    if (this.#handledClose || this.#handledEndOfData) {
       return;
     }
 
