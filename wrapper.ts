@@ -50,11 +50,15 @@ export class Pty {
   #handledEndOfData: boolean = false;
 
   #socket: ReadStream;
+  #writable: Writable;
+
   get read(): Readable {
     return this.#socket;
   }
 
-  write: Writable;
+  get write(): Writable {
+    return this.#writable;
+  }
 
   constructor(options: PtyOptions) {
     const realExit = options.onExit;
@@ -79,8 +83,8 @@ export class Pty {
     // Transfer ownership of the FD to us.
     this.#fd = this.#pty.takeFd();
 
-    this.#socket = new ReadStream(this.#fd)
-    this.write = new Writable({
+    this.#socket = new ReadStream(this.#fd);
+    this.#writable = new Writable({
       write: this.#socket.write.bind(this.#socket),
     });
 
@@ -95,8 +99,8 @@ export class Pty {
       // must wait for fd close and exit result before calling real exit
       await fdClosed;
       const result = await exitResult;
-      realExit(result.error, result.code)
-    }
+      realExit(result.error, result.code);
+    };
 
     this.read.on('end', handleEnd);
     this.read.on('close', () => {
@@ -114,8 +118,7 @@ export class Pty {
           // syscall due to it being interrupted by another syscall, and EAGAIN happens when there
           // is no more data to be read by the fd.
           return;
-        }
-        if (code.indexOf('EIO') !== -1) {
+        } else if (code.indexOf('EIO') !== -1) {
           // EIO only happens when the child dies. It is therefore our only true signal that there
           // is nothing left to read and we can start tearing things down. If we hadn't received an
           // error so far, we are considered to be in good standing.
@@ -124,6 +127,9 @@ export class Pty {
           return;
         }
       }
+
+      // if we haven't handled the error by now, we should throw it
+      throw err;
     };
 
     this.read.on('error', handleError);
