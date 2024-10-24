@@ -118,8 +118,7 @@ export class Pty {
           // syscall due to it being interrupted by another syscall, and EAGAIN happens when there
           // is no more data to be read by the fd.
           return;
-        }
-        if (code.indexOf('EIO') !== -1) {
+        } else if (code.indexOf('EIO') !== -1) {
           // EIO only happens when the child dies. It is therefore our only true signal that there
           // is nothing left to read and we can start tearing things down. If we hadn't received an
           // error so far, we are considered to be in good standing.
@@ -128,6 +127,9 @@ export class Pty {
           return;
         }
       }
+
+      // if we haven't handled the error by now, we should throw it
+      throw err;
     };
 
     this.read.on('error', handleError);
