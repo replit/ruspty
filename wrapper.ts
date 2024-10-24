@@ -117,7 +117,7 @@ export class Pty {
           // error so far, we are considered to be in good standing.
           console.log('eio')
           this.read.off('error', handleError);
-          markFdClosed();
+          handleEnd();
           return;
         }
       }
