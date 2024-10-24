@@ -129,7 +129,7 @@ export class Pty {
           this.read.off('error', handleError);
 
           console.log('eio')
-          handleEnd();
+          // handleEnd();
           return;
         }
       }

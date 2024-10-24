@@ -347,7 +347,6 @@ describe(
             onExit: (err, exitCode) => {
               expect(err).toBeNull();
               expect(exitCode).toBe(0);
-              // account for the newline
               expect(buffer.toString().length).toBe(payload.length);
               done();
             },
