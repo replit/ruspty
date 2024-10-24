@@ -53,13 +53,17 @@ export class Pty {
   constructor(options: PtyOptions) {
     const realExit = options.onExit;
 
-    let resolve: (value: ExitResult) => void;
-    let exitResult: Promise<ExitResult> = new Promise((res) => {
-      resolve = res;
+    let markExited: (value: ExitResult) => void;
+    let exitResult: Promise<ExitResult> = new Promise((resolve) => {
+      markExited = resolve;
+    });
+    let markFdClosed: () => void;
+    let fdClosed = new Promise<void>((resolve) => {
+      markFdClosed = resolve;
     });
     const mockedExit = (error: NodeJS.ErrnoException | null, code: number) => {
       console.log('mocked exit')
-      resolve({ error, code });
+      markExited({ error, code });
     };
 
     // when pty exits, we should wait until the fd actually ends (end OR error)
@@ -74,20 +78,24 @@ export class Pty {
     this.write = new WriteStream(this.#fd);
 
     // catch end events
-    const handleEnd = () => {
+    const handleEnd = async () => {
       if (this.#fdEnded) {
         return;
       }
 
-      this.close();
       this.#fdEnded = true;
-      exitResult.then((result) => {
-        console.log('calling real exit')
-        realExit(result.error, result.code)
-      });
+
+      // must wait for fd close and exit result before calling real exit
+      await fdClosed;
+      const result = await exitResult;
+      console.log('calling real exit')
+      realExit(result.error, result.code)
     }
 
     this.read.on('end', handleEnd);
+    this.read.on('close', () => {
+      markFdClosed();
+    });
 
     // PTYs signal their done-ness with an EIO error. we therefore need to filter them out (as well as
     // cleaning up other spurious errors) so that the user doesn't need to handle them and be in
@@ -107,7 +115,7 @@ export class Pty {
           // error so far, we are considered to be in good standing.
           console.log('eio')
           this.read.off('error', handleError);
-          handleEnd();
+          markFdClosed();
           return;
         }
       }
