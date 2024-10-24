@@ -309,16 +309,16 @@ describe(
           let buffer = Buffer.from('');
           const n = 1024;
           const pty = new Pty({
-            command: '/bin/echo',
+            command: '/bin/sh',
             args: [
-              '-n',
-              `${[...Array(n + 1).keys()].join('\n')}`,
+              '-c',
+              'seq 0 1024'
             ],
             onExit: (err, exitCode) => {
               expect(err).toBeNull();
               expect(exitCode).toBe(0);
-              expect(buffer.toString().trim()).toBe(
-                [...Array(n + 1).keys()].join('\r\n'),
+              expect(buffer.toString().trim().split('\n').map(Number)).toStrictEqual(
+                Array.from({ length: n + 1 }, (_, i) => i),
               );
               expect(getOpenFds()).toStrictEqual(oldFds);
               done();
