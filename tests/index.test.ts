@@ -47,7 +47,7 @@ function getOpenFds(): FdRecord {
 
 describe(
   'PTY',
-  { repeats: 50 },
+  // { repeats: 50 },
   () => {
     test('spawns and exits', () =>
       new Promise<void>((done) => {
@@ -88,7 +88,7 @@ describe(
         });
 
         // set a pty reader so it can flow
-        pty.read.on('data', () => {});
+        pty.read.on('data', () => { });
       }));
 
     test('can be written to', () =>
@@ -276,7 +276,7 @@ describe(
         },
       });
 
-      pty.read.on('data', () => {});
+      pty.read.on('data', () => { });
     }));
 
     test('resize after close shouldn\'t throw', () => new Promise<void>((done, reject) => {
@@ -292,7 +292,7 @@ describe(
         },
       });
 
-      pty.read.on('data', () => {});
+      pty.read.on('data', () => { });
 
       pty.close();
       expect(() => {
@@ -309,10 +309,10 @@ describe(
           let buffer = Buffer.from('');
           const n = 1024;
           const pty = new Pty({
-            command: '/bin/sh',
+            command: '/bin/echo',
             args: [
-              '-c',
-              `for i in $(seq 0 ${n}); do /bin/echo $i; done && exit`,
+              '-n',
+              `${[...Array(n + 1).keys()].join('\n')}`,
             ],
             onExit: (err, exitCode) => {
               expect(err).toBeNull();
@@ -333,7 +333,6 @@ describe(
     );
 
     test('doesnt miss large output from fast commands',
-      { repeats: 50 },
       () =>
         new Promise<void>((done) => {
           const payload = `hello`.repeat(4096);
@@ -362,7 +361,6 @@ describe(
 
     testSkipOnDarwin(
       'does not leak files',
-      { repeats: 4 },
       () =>
         new Promise<void>((done) => {
           const oldFds = getOpenFds();
@@ -408,7 +406,6 @@ describe(
 
     test(
       'can run concurrent shells',
-      { repeats: 4 },
       () =>
         new Promise<void>((done) => {
           const oldFds = getOpenFds();

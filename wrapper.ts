@@ -74,20 +74,24 @@ export class Pty {
 
     // catch end events
     const handleClose = () => {
-      if (this.#fdEnded) {
-        return;
-      }
-
       this.#fdEnded = true;
     };
 
-    this.read.on('close', handleClose);
 
-    this.read.on('end', () => {
+    let ttyStreamEnded = false;
+    const handleEnd = () => {
+      if (ttyStreamEnded) {
+        return;
+      }
+
+      ttyStreamEnded = true;
       exitResult.then((result) => {
         realExit(result.error, result.code)
       });
-    })
+    }
+
+    this.read.on('close', handleClose);
+    this.read.on('end', handleEnd);
 
     // PTYs signal their done-ness with an EIO error. we therefore need to filter them out (as well as
     // cleaning up other spurious errors) so that the user doesn't need to handle them and be in
@@ -106,7 +110,7 @@ export class Pty {
           // is nothing left to read and we can start tearing things down. If we hadn't received an
           // error so far, we are considered to be in good standing.
           this.read.off('error', handleError);
-          this.write.end();
+          handleEnd();
           return;
         }
       }
