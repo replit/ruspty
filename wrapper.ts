@@ -74,12 +74,14 @@ export class Pty {
 
     // catch end events
     const handleClose = () => {
+      console.log('handle close')
       this.#fdEnded = true;
     };
 
 
     let ttyStreamEnded = false;
     const handleEnd = () => {
+      console.log('handle end')
       if (ttyStreamEnded) {
         return;
       }
@@ -109,6 +111,7 @@ export class Pty {
           // EIO only happens when the child dies. It is therefore our only true signal that there
           // is nothing left to read and we can start tearing things down. If we hadn't received an
           // error so far, we are considered to be in good standing.
+          console.log('eio')
           this.read.off('error', handleError);
           handleEnd();
           return;
