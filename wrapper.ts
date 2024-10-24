@@ -74,27 +74,18 @@ export class Pty {
     this.write = new WriteStream(this.#fd);
 
     // catch end events
-    const handleClose = () => {
-      console.log('handle close')
-      this.#fdEnded = true;
-    };
-
-
-    let ttyStreamEnded = false;
     const handleEnd = () => {
-      console.log('handle end')
-      if (ttyStreamEnded) {
+      if (this.#fdEnded) {
         return;
       }
 
-      ttyStreamEnded = true;
+      this.#fdEnded = true;
       exitResult.then((result) => {
         console.log('calling real exit')
         realExit(result.error, result.code)
       });
     }
 
-    this.read.on('close', handleClose);
     this.read.on('end', handleEnd);
 
     // PTYs signal their done-ness with an EIO error. we therefore need to filter them out (as well as

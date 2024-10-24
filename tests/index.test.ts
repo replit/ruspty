@@ -59,6 +59,7 @@ describe(
           command: '/bin/echo',
           args: [message],
           onExit: (err, exitCode) => {
+            console.log('huhhh')
             expect(err).toBeNull();
             expect(exitCode).toBe(0);
             expect(buffer.trim()).toBe(message);
