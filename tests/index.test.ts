@@ -279,7 +279,7 @@ describe(
       
       process.kill(pty.pid, 'SIGKILL');
       await vi.waitFor(() => expect(onExit).toHaveBeenCalledTimes(1));
-      expect(onExit).toHaveBeenCalledWith(null, 0);
+      expect(onExit).toHaveBeenCalledWith(null, -1);
     });
 
     test(
