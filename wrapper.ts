@@ -1,4 +1,4 @@
-import { PassThrough, type Readable, type Writable } from 'node:stream';
+import { type Readable, Writable } from 'node:stream';
 import { ReadStream } from 'node:tty';
 import {
   Pty as RawPty,
@@ -45,21 +45,30 @@ type ExitResult = {
 export class Pty {
   #pty: RawPty;
   #fd: number;
-  #fdEnded: boolean = false;
-  #socket: ReadStream;
 
-  read: Readable;
+  #handledClose: boolean = false;
+  #handledEndOfData: boolean = false;
+
+  #socket: ReadStream;
+  get read(): Readable {
+    return this.#socket;
+  }
+
   write: Writable;
 
   constructor(options: PtyOptions) {
     const realExit = options.onExit;
 
-    let resolve: (value: ExitResult) => void;
-    let exitResult: Promise<ExitResult> = new Promise((res) => {
-      resolve = res;
+    let markExited: (value: ExitResult) => void;
+    let exitResult: Promise<ExitResult> = new Promise((resolve) => {
+      markExited = resolve;
+    });
+    let markFdClosed: () => void;
+    let fdClosed = new Promise<void>((resolve) => {
+      markFdClosed = resolve;
     });
     const mockedExit = (error: NodeJS.ErrnoException | null, code: number) => {
-      resolve({ error, code });
+      markExited({ error, code });
     };
 
     // when pty exits, we should wait until the fd actually ends (end OR error)
@@ -70,27 +79,29 @@ export class Pty {
     // Transfer ownership of the FD to us.
     this.#fd = this.#pty.takeFd();
 
-    this.#socket = new ReadStream(this.#fd);
-    const userFacingRead = new PassThrough();
-    const userFacingWrite = new PassThrough();
-    this.#socket.pipe(userFacingRead);
-    userFacingWrite.pipe(this.#socket);
-    this.read = userFacingRead;
-    this.write = userFacingWrite;
+    this.#socket = new ReadStream(this.#fd)
+    this.write = new Writable({
+      write: this.#socket.write.bind(this.#socket),
+    });
 
     // catch end events
-    const handleClose = () => {
-      if (this.#fdEnded) {
+    const handleEnd = async () => {
+      if (this.#handledEndOfData) {
         return;
       }
 
-      this.#fdEnded = true;
-      exitResult.then((result) => {
-        realExit(result.error, result.code)
-      });
-      userFacingRead.end();
-    };
-    this.#socket.on('close', handleClose);
+      this.#handledEndOfData = true;
+
+      // must wait for fd close and exit result before calling real exit
+      await fdClosed;
+      const result = await exitResult;
+      realExit(result.error, result.code)
+    }
+
+    this.read.on('end', handleEnd);
+    this.read.on('close', () => {
+      markFdClosed();
+    });
 
     // PTYs signal their done-ness with an EIO error. we therefore need to filter them out (as well as
     // cleaning up other spurious errors) so that the user doesn't need to handle them and be in
@@ -108,25 +119,26 @@ export class Pty {
           // EIO only happens when the child dies. It is therefore our only true signal that there
           // is nothing left to read and we can start tearing things down. If we hadn't received an
           // error so far, we are considered to be in good standing.
-          this.#socket.off('error', handleError);
-          this.#socket.end();
+          this.read.off('error', handleError);
+          handleEnd();
           return;
         }
       }
-
-      this.read.emit('error', err);
     };
-    this.#socket.on('error', handleError);
+
+    this.read.on('error', handleError);
   }
 
   close() {
+    this.#handledClose = true;
+
     // end instead of destroy so that the user can read the last bits of data
     // and allow graceful close event to mark the fd as ended
     this.#socket.end();
   }
 
   resize(size: Size) {
-    if (this.#fdEnded) {
+    if (this.#handledClose || this.#handledEndOfData) {
       return;
     }
 

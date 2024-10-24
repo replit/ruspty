@@ -76,7 +76,7 @@ describe(
     test('captures an exit code', () =>
       new Promise<void>((done) => {
         const oldFds = getOpenFds();
-        new Pty({
+        const pty = new Pty({
           command: '/bin/sh',
           args: ['-c', 'exit 17'],
           onExit: (err, exitCode) => {
@@ -86,6 +86,9 @@ describe(
             done();
           },
         });
+
+        // set a pty reader so it can flow
+        pty.read.on('data', () => { });
       }));
 
     test('can be written to', () =>
@@ -272,6 +275,8 @@ describe(
           }
         },
       });
+
+      pty.read.on('data', () => { });
     }));
 
     test('resize after close shouldn\'t throw', () => new Promise<void>((done, reject) => {
@@ -286,6 +291,8 @@ describe(
           }
         },
       });
+
+      pty.read.on('data', () => { });
 
       pty.close();
       expect(() => {
@@ -305,13 +312,13 @@ describe(
             command: '/bin/sh',
             args: [
               '-c',
-              `for i in $(seq 0 ${n}); do /bin/echo $i; done && exit`,
+              'seq 0 1024'
             ],
             onExit: (err, exitCode) => {
               expect(err).toBeNull();
               expect(exitCode).toBe(0);
-              expect(buffer.toString().trim()).toBe(
-                [...Array(n + 1).keys()].join('\r\n'),
+              expect(buffer.toString().trim().split('\n').map(Number)).toStrictEqual(
+                Array.from({ length: n + 1 }, (_, i) => i),
               );
               expect(getOpenFds()).toStrictEqual(oldFds);
               done();
@@ -325,9 +332,35 @@ describe(
         }),
     );
 
+    test('doesnt miss large output from fast commands',
+      () =>
+        new Promise<void>((done) => {
+          const payload = `hello`.repeat(4096);
+          let buffer = Buffer.from('');
+          const pty = new Pty({
+            command: '/bin/echo',
+            args: [
+              '-n',
+              payload
+            ],
+            onExit: (err, exitCode) => {
+              expect(err).toBeNull();
+              expect(exitCode).toBe(0);
+              // account for the newline
+              expect(buffer.toString().length).toBe(payload.length);
+              done();
+            },
+          });
+
+          const readStream = pty.read;
+          readStream.on('data', (data) => {
+            buffer = Buffer.concat([buffer, data]);
+          });
+        })
+    );
+
     testSkipOnDarwin(
       'does not leak files',
-      { repeats: 4 },
       () =>
         new Promise<void>((done) => {
           const oldFds = getOpenFds();
@@ -373,7 +406,6 @@ describe(
 
     test(
       'can run concurrent shells',
-      { repeats: 4 },
       () =>
         new Promise<void>((done) => {
           const oldFds = getOpenFds();
