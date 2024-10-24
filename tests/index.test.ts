@@ -47,7 +47,7 @@ function getOpenFds(): FdRecord {
 
 describe(
   'PTY',
-  { repeats: 50 },
+  { repeats: 1000 },
   () => {
     test('spawns and exits', async () => {
       const oldFds = getOpenFds();
@@ -285,7 +285,6 @@ describe(
 
     test(
       'ordering is correct',
-      { repeats: 100 },
       async () => {
         const oldFds = getOpenFds();
         let buffer = Buffer.from('');
