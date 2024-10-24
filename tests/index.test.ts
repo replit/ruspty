@@ -332,14 +332,15 @@ describe(
           const payload = `hello`.repeat(4096);
           let buffer = Buffer.from('');
           const pty = new Pty({
-            command: '/bin/sh',
+            command: '/bin/echo',
             args: [
-              '-c',
-              `echo ${payload}`,
+              '-n',
+              payload
             ],
             onExit: (err, exitCode) => {
               expect(err).toBeNull();
               expect(exitCode).toBe(0);
+              // account for the newline
               expect(buffer.toString().length).toBe(payload.length);
               done();
             },
