@@ -76,7 +76,7 @@ describe(
     test('captures an exit code', () =>
       new Promise<void>((done) => {
         const oldFds = getOpenFds();
-        new Pty({
+        const pty = new Pty({
           command: '/bin/sh',
           args: ['-c', 'exit 17'],
           onExit: (err, exitCode) => {
@@ -86,6 +86,9 @@ describe(
             done();
           },
         });
+
+        // set a pty reader so it can flow
+        pty.read.on('data', () => {});
       }));
 
     test('can be written to', () =>
@@ -272,6 +275,8 @@ describe(
           }
         },
       });
+
+      pty.read.on('data', () => {});
     }));
 
     test('resize after close shouldn\'t throw', () => new Promise<void>((done, reject) => {
@@ -286,6 +291,8 @@ describe(
           }
         },
       });
+
+      pty.read.on('data', () => {});
 
       pty.close();
       expect(() => {

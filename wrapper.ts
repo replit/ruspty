@@ -1,5 +1,5 @@
-import { PassThrough, type Readable, type Writable } from 'node:stream';
-import { ReadStream } from 'node:tty';
+import { type Readable, type Writable } from 'node:stream';
+import { ReadStream, WriteStream } from 'node:tty';
 import {
   Pty as RawPty,
   type Size,
@@ -46,7 +46,6 @@ export class Pty {
   #pty: RawPty;
   #fd: number;
   #fdEnded: boolean = false;
-  #socket: ReadStream;
 
   read: Readable;
   write: Writable;
@@ -70,13 +69,8 @@ export class Pty {
     // Transfer ownership of the FD to us.
     this.#fd = this.#pty.takeFd();
 
-    this.#socket = new ReadStream(this.#fd);
-    // const userFacingRead = new PassThrough();
-    // const userFacingWrite = new PassThrough();
-    // this.#socket.pipe(userFacingRead);
-    // userFacingWrite.pipe(this.#socket);
-    this.read = this.#socket;
-    this.write = this.#socket;
+    this.read = new ReadStream(this.#fd);
+    this.write = new WriteStream(this.#fd);
 
     // catch end events
     const handleClose = () => {
@@ -89,7 +83,7 @@ export class Pty {
         realExit(result.error, result.code)
       });
     };
-    this.#socket.on('close', handleClose);
+    this.read.on('close', handleClose);
 
     // PTYs signal their done-ness with an EIO error. we therefore need to filter them out (as well as
     // cleaning up other spurious errors) so that the user doesn't need to handle them and be in
@@ -107,21 +101,21 @@ export class Pty {
           // EIO only happens when the child dies. It is therefore our only true signal that there
           // is nothing left to read and we can start tearing things down. If we hadn't received an
           // error so far, we are considered to be in good standing.
-          this.#socket.off('error', handleError);
-          this.#socket.end();
+          this.read.off('error', handleError);
+          console.log("EIO")
+          this.write.end();
           return;
         }
       }
-
-      this.read.emit('error', err);
     };
-    this.#socket.on('error', handleError);
+
+    this.read.on('error', handleError);
   }
 
   close() {
     // end instead of destroy so that the user can read the last bits of data
     // and allow graceful close event to mark the fd as ended
-    this.#socket.end();
+    this.write.end();
   }
 
   resize(size: Size) {
