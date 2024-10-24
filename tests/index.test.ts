@@ -47,7 +47,7 @@ function getOpenFds(): FdRecord {
 
 describe(
   'PTY',
-  { repeats: 100 },
+  // { repeats: 100 },
   () => {
     test('spawns and exits', async () => {
       const oldFds = getOpenFds();

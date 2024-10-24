@@ -203,7 +203,62 @@ impl Pty {
         // set input modes
         let user_fd = OwnedFd::from_raw_fd(raw_user_fd);
         if let Ok(mut termios) = termios::tcgetattr(&user_fd) {
-          termios.input_flags |= termios::InputFlags::IUTF8;
+          // Input flags
+          termios.input_flags = termios::InputFlags::ICRNL  // Map CR to NL on input
+            | termios::InputFlags::IXON    // Enable XON/XOFF flow control on output
+            | termios::InputFlags::IXANY   // Allow any character to restart output
+            | termios::InputFlags::IMAXBEL // Ring bell when input queue is full
+            | termios::InputFlags::BRKINT  // Send SIGINT on break
+            | termios::InputFlags::IUTF8; // UTF8 input handling
+
+          // Output flags
+          termios.output_flags = termios::OutputFlags::OPOST   // Post-process output
+            | termios::OutputFlags::ONLCR; // Map NL to CR-NL on output
+
+          // Control flags
+          termios.control_flags = termios::ControlFlags::CREAD  // Enable receiver
+            | termios::ControlFlags::CS8    // 8 bit chars
+            | termios::ControlFlags::HUPCL; // Hangup on last close
+
+          // Local flags
+          termios.local_flags = termios::LocalFlags::ICANON  // Enable canonical mode
+            | termios::LocalFlags::ISIG    // Enable signals
+            | termios::LocalFlags::IEXTEN  // Enable extended functions
+            | termios::LocalFlags::ECHO    // Enable echo
+            | termios::LocalFlags::ECHOE   // Echo erase char as BS-SP-BS
+            | termios::LocalFlags::ECHOK   // Echo kill char
+            | termios::LocalFlags::ECHOKE  // BS-SP-BS entire line on kill
+            | termios::LocalFlags::ECHOCTL; // Echo control chars as ^X
+
+          // Control chars
+          termios.control_chars[termios::SpecialCharacterIndices::VEOF as usize] = 4; // ^D
+          termios.control_chars[termios::SpecialCharacterIndices::VEOL as usize] = 0xff; // disabled
+          termios.control_chars[termios::SpecialCharacterIndices::VEOL2 as usize] = 0xff; // disabled
+          termios.control_chars[termios::SpecialCharacterIndices::VERASE as usize] = 0x7f; // ^?
+          termios.control_chars[termios::SpecialCharacterIndices::VWERASE as usize] = 23; // ^W
+          termios.control_chars[termios::SpecialCharacterIndices::VKILL as usize] = 21; // ^U
+          termios.control_chars[termios::SpecialCharacterIndices::VREPRINT as usize] = 18; // ^R
+          termios.control_chars[termios::SpecialCharacterIndices::VINTR as usize] = 3; // ^C
+          termios.control_chars[termios::SpecialCharacterIndices::VQUIT as usize] = 0x1c; // ^\
+          termios.control_chars[termios::SpecialCharacterIndices::VSUSP as usize] = 26; // ^Z
+          termios.control_chars[termios::SpecialCharacterIndices::VSTART as usize] = 17; // ^Q
+          termios.control_chars[termios::SpecialCharacterIndices::VSTOP as usize] = 19; // ^S
+          termios.control_chars[termios::SpecialCharacterIndices::VLNEXT as usize] = 22; // ^V
+          termios.control_chars[termios::SpecialCharacterIndices::VDISCARD as usize] = 15; // ^O
+          termios.control_chars[termios::SpecialCharacterIndices::VMIN as usize] = 1;
+          termios.control_chars[termios::SpecialCharacterIndices::VTIME as usize] = 0;
+
+          #[cfg(target_os = "macos")]
+          {
+            termios.control_chars[termios::SpecialCharacterIndices::VDSUSP as usize] = 25; // ^Y
+            termios.control_chars[termios::SpecialCharacterIndices::VSTATUS as usize] = 20;
+            // ^T
+          }
+
+          // Set input/output baud rate
+          termios::cfsetispeed(&mut termios, termios::BaudRate::B38400)?;
+          termios::cfsetospeed(&mut termios, termios::BaudRate::B38400)?;
+
           termios::tcsetattr(&user_fd, SetArg::TCSANOW, &termios)?;
         }
 

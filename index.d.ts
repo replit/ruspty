@@ -5,40 +5,40 @@
 
 /** The options that can be passed to the constructor of Pty. */
 export interface PtyOptions {
-  command: string;
-  args?: Array<string>;
-  envs?: Record<string, string>;
-  dir?: string;
-  size?: Size;
-  cgroupPath?: string;
-  interactive?: boolean;
-  onExit: (err: null | Error, exitCode: number) => void;
+  command: string
+  args?: Array<string>
+  envs?: Record<string, string>
+  dir?: string
+  size?: Size
+  cgroupPath?: string
+  interactive?: boolean
+  onExit: (err: null | Error, exitCode: number) => void
 }
 /** A size struct to pass to resize. */
 export interface Size {
-  cols: number;
-  rows: number;
+  cols: number
+  rows: number
 }
 /** Resize the terminal. */
-export function ptyResize(fd: number, size: Size): void;
+export function ptyResize(fd: number, size: Size): void
 /**
  * Set the close-on-exec flag on a file descriptor. This is `fcntl(fd, F_SETFD, FD_CLOEXEC)` under
  * the covers.
  */
-export function setCloseOnExec(fd: number, closeOnExec: boolean): void;
+export function setCloseOnExec(fd: number, closeOnExec: boolean): void
 /**
  * Get the close-on-exec flag on a file descriptor. This is `fcntl(fd, F_GETFD) & FD_CLOEXEC ==
  *_CLOEXEC` under the covers.
  */
-export function getCloseOnExec(fd: number): boolean;
+export function getCloseOnExec(fd: number): boolean
 export class Pty {
   /** The pid of the forked process. */
-  pid: number;
-  constructor(opts: PtyOptions);
+  pid: number
+  constructor(opts: PtyOptions)
   /**
    * Transfers ownership of the file descriptor for the PTY controller. This can only be called
    * once (it will error the second time). The caller is responsible for closing the file
    * descriptor.
    */
-  takeFd(): c_int;
+  takeFd(): c_int
 }
