@@ -62,7 +62,6 @@ export class Pty {
       markFdClosed = resolve;
     });
     const mockedExit = (error: NodeJS.ErrnoException | null, code: number) => {
-      console.log('mocked exit')
       markExited({ error, code });
     };
 
@@ -79,7 +78,6 @@ export class Pty {
 
     // catch end events
     const handleEnd = async () => {
-      console.log('handle end')
       if (this.#fdEnded) {
         return;
       }
@@ -89,13 +87,11 @@ export class Pty {
       // must wait for fd close and exit result before calling real exit
       await fdClosed;
       const result = await exitResult;
-      console.log('calling real exit')
       realExit(result.error, result.code)
     }
 
     this.read.on('end', handleEnd);
     this.read.on('close', () => {
-      console.log('handle close')
       markFdClosed();
     });
 
@@ -115,7 +111,6 @@ export class Pty {
           // EIO only happens when the child dies. It is therefore our only true signal that there
           // is nothing left to read and we can start tearing things down. If we hadn't received an
           // error so far, we are considered to be in good standing.
-          console.log('eio')
           this.read.off('error', handleError);
           handleEnd();
           return;

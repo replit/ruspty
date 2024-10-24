@@ -47,7 +47,7 @@ function getOpenFds(): FdRecord {
 
 describe(
   'PTY',
-  // { repeats: 50 },
+  { repeats: 50 },
   () => {
     test('spawns and exits', () =>
       new Promise<void>((done) => {
