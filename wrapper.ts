@@ -1,5 +1,5 @@
 import { type Readable, type Writable } from 'node:stream';
-import { ReadStream, WriteStream } from 'node:tty';
+import { ReadStream } from 'node:tty';
 import {
   Pty as RawPty,
   type Size,
@@ -46,9 +46,15 @@ export class Pty {
   #pty: RawPty;
   #fd: number;
   #fdEnded: boolean = false;
+  #socket: ReadStream;
 
-  read: Readable;
-  write: Writable;
+  get read(): Readable {
+    return this.#socket;
+  }
+
+  get write(): Writable {
+    return this.#socket;
+  }
 
   constructor(options: PtyOptions) {
     const realExit = options.onExit;
@@ -73,8 +79,7 @@ export class Pty {
     // Transfer ownership of the FD to us.
     this.#fd = this.#pty.takeFd();
 
-    this.read = new ReadStream(this.#fd);
-    this.write = new WriteStream(this.#fd);
+    this.#socket = new ReadStream(this.#fd);
 
     // catch end events
     const handleEnd = async () => {
@@ -90,8 +95,8 @@ export class Pty {
       realExit(result.error, result.code)
     }
 
-    this.read.on('end', handleEnd);
-    this.read.on('close', () => {
+    this.#socket.on('end', handleEnd);
+    this.#socket.on('close', () => {
       markFdClosed();
     });
 
@@ -111,20 +116,20 @@ export class Pty {
           // EIO only happens when the child dies. It is therefore our only true signal that there
           // is nothing left to read and we can start tearing things down. If we hadn't received an
           // error so far, we are considered to be in good standing.
-          this.read.off('error', handleError);
+          this.#socket.off('error', handleError);
           handleEnd();
           return;
         }
       }
     };
 
-    this.read.on('error', handleError);
+    this.#socket.on('error', handleError);
   }
 
   close() {
     // end instead of destroy so that the user can read the last bits of data
     // and allow graceful close event to mark the fd as ended
-    this.write.end();
+    this.#socket.end();
   }
 
   resize(size: Size) {
