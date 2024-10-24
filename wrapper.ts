@@ -79,6 +79,7 @@ export class Pty {
 
     // catch end events
     const handleEnd = async () => {
+      console.log('handle end')
       if (this.#fdEnded) {
         return;
       }
@@ -94,6 +95,7 @@ export class Pty {
 
     this.read.on('end', handleEnd);
     this.read.on('close', () => {
+      console.log('handle close')
       markFdClosed();
     });
 
