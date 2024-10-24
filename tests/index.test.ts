@@ -277,6 +277,7 @@ describe(
         pty.resize({ rows: 60, cols: 100 });
       }).not.toThrow();
       
+      process.kill(pty.pid, 'SIGKILL');
       await vi.waitFor(() => expect(onExit).toHaveBeenCalledTimes(1));
       expect(onExit).toHaveBeenCalledWith(null, 0);
     });
