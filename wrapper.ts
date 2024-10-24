@@ -79,6 +79,7 @@ export class Pty {
         return;
       }
 
+      this.close();
       this.#fdEnded = true;
       exitResult.then((result) => {
         console.log('calling real exit')
