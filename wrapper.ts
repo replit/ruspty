@@ -67,9 +67,10 @@ export class Pty {
     let exitResult: Promise<ExitResult> = new Promise((resolve) => {
       markExited = resolve;
     });
-    let markFdClosed: () => void;
-    let fdClosed = new Promise<void>((resolve) => {
-      markFdClosed = resolve;
+
+    let markReadFinished: () => void;
+    let readFinished = new Promise<void>((resolve) => {
+      markReadFinished = resolve;
     });
     const mockedExit = (error: NodeJS.ErrnoException | null, code: number) => {
       console.log('mocked exit')
@@ -99,16 +100,19 @@ export class Pty {
 
       // must wait for fd close and exit result before calling real exit
       console.log('handle end')
-      await fdClosed;
+      await readFinished;
       const result = await exitResult;
       realExit(result.error, result.code);
       console.log('done')
     };
 
-    this.read.on('end', handleEnd);
+    this.read.on('end', () => {
+      console.log('end')
+      markReadFinished();
+    });
+
     this.read.on('close', () => {
-      console.log('handle close')
-      markFdClosed();
+      handleEnd();
     });
 
     // PTYs signal their done-ness with an EIO error. we therefore need to filter them out (as well as
@@ -127,9 +131,8 @@ export class Pty {
           // is nothing left to read and we can start tearing things down. If we hadn't received an
           // error so far, we are considered to be in good standing.
           this.read.off('error', handleError);
-
           console.log('eio')
-          // handleEnd();
+          this.#socket.emit('end');
           return;
         }
       }
