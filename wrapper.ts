@@ -72,6 +72,7 @@ export class Pty {
       markFdClosed = resolve;
     });
     const mockedExit = (error: NodeJS.ErrnoException | null, code: number) => {
+      console.log('mocked exit')
       markExited({ error, code });
     };
 
@@ -97,13 +98,16 @@ export class Pty {
       this.#handledEndOfData = true;
 
       // must wait for fd close and exit result before calling real exit
+      console.log('handle end')
       await fdClosed;
       const result = await exitResult;
       realExit(result.error, result.code);
+      console.log('done')
     };
 
     this.read.on('end', handleEnd);
     this.read.on('close', () => {
+      console.log('handle close')
       markFdClosed();
     });
 
@@ -123,6 +127,8 @@ export class Pty {
           // is nothing left to read and we can start tearing things down. If we hadn't received an
           // error so far, we are considered to be in good standing.
           this.read.off('error', handleError);
+
+          console.log('eio')
           handleEnd();
           return;
         }

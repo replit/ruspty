@@ -303,6 +303,7 @@ describe(
 
     test(
       'ordering is correct',
+      { repeats: 100 },
       () =>
         new Promise<void>((done) => {
           const oldFds = getOpenFds();
@@ -312,7 +313,7 @@ describe(
             command: '/bin/sh',
             args: [
               '-c',
-              'seq 0 1024'
+              `seq 0 ${n}`
             ],
             onExit: (err, exitCode) => {
               expect(err).toBeNull();
