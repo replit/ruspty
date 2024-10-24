@@ -325,6 +325,33 @@ describe(
         }),
     );
 
+    test('doesnt miss large output from fast commands',
+      { repeats: 10 },
+      () =>
+        new Promise<void>((done) => {
+          const payload = `hello`.repeat(4096);
+          let buffer = Buffer.from('');
+          const pty = new Pty({
+            command: '/bin/sh',
+            args: [
+              '-c',
+              `echo ${payload}`,
+            ],
+            onExit: (err, exitCode) => {
+              expect(err).toBeNull();
+              expect(exitCode).toBe(0);
+              expect(buffer.toString().length).toBe(payload.length);
+              done();
+            },
+          });
+
+          const readStream = pty.read;
+          readStream.on('data', (data) => {
+            buffer = Buffer.concat([buffer, data]);
+          });
+        })
+    );
+
     testSkipOnDarwin(
       'does not leak files',
       { repeats: 4 },
