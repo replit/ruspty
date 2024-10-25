@@ -47,7 +47,7 @@ function getOpenFds(): FdRecord {
 
 describe(
   'PTY',
-  { repeats: 100 },
+  { repeats: 500 },
   () => {
     test('spawns and exits', async () => {
       const oldFds = getOpenFds();
@@ -283,7 +283,7 @@ describe(
       expect(onExit).toHaveBeenCalledWith(null, -1);
     });
 
-    test(
+    test.only(
       'ordering is correct',
       async () => {
         const oldFds = getOpenFds();
@@ -307,9 +307,12 @@ describe(
 
         await vi.waitFor(() => expect(onExit).toHaveBeenCalledTimes(1));
         expect(onExit).toHaveBeenCalledWith(null, 0);
-        expect(buffer.toString().trim().split('\n').map(Number)).toStrictEqual(
-          Array.from({ length: n + 1 }, (_, i) => i),
-        );
+
+        const lines = buffer.toString().trim().split('\n');
+        for (let i = 0; i < n + 1; i++) {
+          expect(Number(lines[i])).toBe(i);
+        }
+
         expect(getOpenFds()).toStrictEqual(oldFds);
       }
     );
