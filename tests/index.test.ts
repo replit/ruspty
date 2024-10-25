@@ -308,7 +308,6 @@ describe(
         await vi.waitFor(() => expect(onExit).toHaveBeenCalledTimes(1));
         expect(onExit).toHaveBeenCalledWith(null, 0);
 
-        console.log(buffer.byteLength)
         const lines = buffer.toString().trim().split('\n');
         expect(lines.length).toBe(n + 1);
         for (let i = 0; i < n + 1; i++) {
@@ -319,7 +318,7 @@ describe(
       }
     );
 
-    test('doesnt miss large output from fast commands', async () => {
+    test.only('doesnt miss large output from fast commands', async () => {
       const payload = `hello`.repeat(4096);
       let buffer = Buffer.from('');
       const onExit = vi.fn();
