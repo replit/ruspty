@@ -308,13 +308,16 @@ describe(
           buffer = Buffer.concat([buffer, data]);
         });
 
+        readStream.on('error', (err) => console.log('error', err));
+
         await vi.waitFor(() => expect(onExit).toHaveBeenCalledTimes(1));
         expect(onExit).toHaveBeenCalledWith(null, 0);
 
         const lines = buffer.toString().trim().split('\n');
         console.log('got lines', lines.length, 'expected', n + 1);
-        expect(lines.length).toBe(n + 1);
+        console.log('readable ended', readStream.readableEnded);
         console.log('-- end --')
+        expect(lines.length).toBe(n + 1);
         // for (let i = 0; i < n + 1; i++) {
         //   expect(Number(lines[i]), `expected line ${i} to contain ${i} but got ${lines[i]}`).toBe(i);
         // }
