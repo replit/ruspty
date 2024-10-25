@@ -1,6 +1,6 @@
 import { type Readable, Writable } from 'node:stream';
 import { ReadStream } from 'node:tty';
-import { Pty as RawPty, type Size } from './index.js';
+import { Pty as RawPty, ptyResize, type Size } from './index.js';
 import { type PtyOptions as RawOptions } from './index.js';
 
 export type PtyOptions = RawOptions;
