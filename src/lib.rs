@@ -78,23 +78,17 @@ fn poll_controller_fd_until_read(raw_fd: RawFd) {
     if let Err(err) = poll(&mut [poll_fd], PollTimeout::ZERO) {
       if err == Errno::EINTR || err == Errno::EAGAIN {
         // we were interrupted, so we should just try again
-        println!("poll interrupted");
-        io::stdout().flush().unwrap();
         continue;
       }
 
       // we should almost never hit this, but if we do, we should just break out of the loop. this
       // can happen if Node destroys the terminal before waiting for the child process to go away.
-      println!("poll error: {}", err);
-      io::stdout().flush().unwrap();
       break;
     }
 
     // check if POLLIN is no longer set (i.e. there is no more data to read)
     if let Some(flags) = poll_fd.revents() {
       if !flags.contains(PollFlags::POLLIN) {
-        println!("poll complete");
-        io::stdout().flush().unwrap();
         break;
       }
     }
@@ -105,8 +99,6 @@ fn poll_controller_fd_until_read(raw_fd: RawFd) {
       continue;
     } else {
       // we have exhausted our attempts, its joever
-      println!("poll timeout");
-      io::stdout().flush().unwrap();
       break;
     }
   }
@@ -173,8 +165,6 @@ impl Pty {
     unsafe {
       // right before we spawn the child, we should do a bunch of setup
       // this is all run in the context of the child process
-      println!("pre_exec");
-      io::stdout().flush().unwrap();
       cmd.pre_exec(move || {
         // start a new session
         let err = libc::setsid();
@@ -231,8 +221,6 @@ impl Pty {
     }
 
     // actually spawn the child
-    println!("spawn");
-    io::stdout().flush().unwrap();
     let mut child = cmd.spawn()?;
     let pid = child.id();
 
@@ -256,18 +244,10 @@ impl Pty {
     thread::spawn(move || {
       drop(user_fd);
 
-      println!("start wait");
-      io::stdout().flush().unwrap();
       let wait_result = child.wait();
-      println!("end wait");
-      io::stdout().flush().unwrap();
 
       // try to wait for the controller fd to be fully read
-      println!("start poll");
-      io::stdout().flush().unwrap();
       poll_controller_fd_until_read(raw_controller_fd);
-      println!("end poll");
-      io::stdout().flush().unwrap();
 
       match wait_result {
         Ok(status) => {
