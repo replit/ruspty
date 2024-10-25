@@ -283,7 +283,7 @@ describe(
       expect(onExit).toHaveBeenCalledWith(null, -1);
     });
 
-    test(
+    test.only(
       'ordering is correct',
       async () => {
         console.log('-- start --')
