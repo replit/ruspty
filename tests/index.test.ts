@@ -295,7 +295,7 @@ describe(
           command: '/bin/sh',
           args: [
             '-c',
-            `seq 0 ${n} && sleep 0.1`
+            `seq 0 ${n}`
           ],
           onExit,
         });
@@ -305,8 +305,10 @@ describe(
           buffer = Buffer.concat([buffer, data]);
         });
 
+
         await vi.waitFor(() => expect(onExit).toHaveBeenCalledTimes(1));
         expect(onExit).toHaveBeenCalledWith(null, 0);
+        expect(readStream.readableEnded).toBe(true);
 
         const lines = buffer.toString().trim().split('\n');
         expect(lines.length).toBe(n + 1);
@@ -318,7 +320,7 @@ describe(
       }
     );
 
-    test.only('doesnt miss large output from fast commands', async () => {
+    test('doesnt miss large output from fast commands', async () => {
       const payload = `hello`.repeat(4096);
       let buffer = Buffer.from('');
       const onExit = vi.fn();
