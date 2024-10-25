@@ -73,6 +73,7 @@ export class Pty {
       markReadFinished = resolve;
     });
     const mockedExit = (error: NodeJS.ErrnoException | null, code: number) => {
+      console.log('mocked exit')
       markExited({ error, code });
     };
 
@@ -97,17 +98,21 @@ export class Pty {
 
       this.#fdClosed = true;
 
+      console.log('close')
       // must wait for fd close and exit result before calling real exit
       await readFinished;
       const result = await exitResult;
+      console.log('real exit')
       realExit(result.error, result.code);
     };
 
     this.read.on('end', () => {
+      console.log('readable finished')
       markReadFinished();
     });
 
     this.read.on('close', () => {
+      console.log('user-side pty fd closed')
       handleClose();
     });
 
