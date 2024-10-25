@@ -73,7 +73,7 @@ export class Pty {
       markReadFinished = resolve;
     });
     const mockedExit = (error: NodeJS.ErrnoException | null, code: number) => {
-      console.log('mocked exit')
+      console.log('mocked exit');
       markExited({ error, code });
     };
 
@@ -98,21 +98,21 @@ export class Pty {
 
       this.#fdClosed = true;
 
-      console.log('close')
+      console.log('close');
       // must wait for fd close and exit result before calling real exit
       await readFinished;
       const result = await exitResult;
-      console.log('real exit')
+      console.log('real exit');
       realExit(result.error, result.code);
     };
 
     this.read.on('end', () => {
-      console.log('readable finished')
+      console.log('readable finished');
       markReadFinished();
     });
 
     this.read.on('close', () => {
-      console.log('user-side pty fd closed')
+      console.log('user-side pty fd closed');
       handleClose();
     });
 
@@ -132,7 +132,8 @@ export class Pty {
           // is nothing left to read and we can start tearing things down. If we hadn't received an
           // error so far, we are considered to be in good standing.
           this.read.off('error', handleError);
-          console.log('eio emit')
+          console.log('eio emit');
+          this.#socket.destroySoon();
           // this.#socket.end();
           return;
         }
