@@ -204,7 +204,7 @@ impl Pty {
         let user_fd = OwnedFd::from_raw_fd(raw_user_fd);
         if let Ok(mut termios) = termios::tcgetattr(&user_fd) {
           termios.input_flags |= termios::InputFlags::IUTF8;
-          // termios::tcsetattr(&user_fd, SetArg::TCSANOW, &termios)?;
+          termios::tcsetattr(&user_fd, SetArg::TCSANOW, &termios)?;
         }
 
         // reset signal handlers
