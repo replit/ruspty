@@ -295,7 +295,7 @@ describe(
           command: '/bin/sh',
           args: [
             '-c',
-            `seq 0 ${n}`
+            `seq 0 ${n} && exit`
           ],
           onExit,
         });
@@ -309,6 +309,7 @@ describe(
         expect(onExit).toHaveBeenCalledWith(null, 0);
 
         const lines = buffer.toString().trim().split('\n');
+        expect(lines.length).toBe(n + 1);
         for (let i = 0; i < n + 1; i++) {
           expect(Number(lines[i]), `expected line ${i} to contain ${i} but got ${lines[i]}`).toBe(i);
         }
