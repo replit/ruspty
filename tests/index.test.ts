@@ -310,7 +310,7 @@ describe(
 
         const lines = buffer.toString().trim().split('\n');
         for (let i = 0; i < n + 1; i++) {
-          expect(Number(lines[i])).toBe(i);
+          expect(Number(lines[i]), `expected line ${i} to contain ${i} but got ${lines[i]}`).toBe(i);
         }
 
         expect(getOpenFds()).toStrictEqual(oldFds);
