@@ -133,8 +133,9 @@ export class Pty {
           // error so far, we are considered to be in good standing.
           this.read.off('error', handleError);
           console.log('eio emit');
-          this.#socket.destroySoon();
-          // this.#socket.end();
+          // emit 'end' to signal no more data
+          // this will trigger our 'end' handler which marks readFinished
+          this.read.emit('end');
           return;
         }
       }
