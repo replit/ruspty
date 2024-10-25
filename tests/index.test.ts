@@ -295,7 +295,7 @@ describe(
           command: '/bin/sh',
           args: [
             '-c',
-            `seq 0 ${n} && exit`
+            `seq 0 ${n} && sleep 0.1`
           ],
           onExit,
         });
