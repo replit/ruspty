@@ -36,10 +36,10 @@
   },
   "scripts": {
     "artifacts": "napi artifacts",
-    "build": "napi build --platform --release && npm run build:wrapper",
+    "build": "napi build --platform --release && npm run build:wrapper && npm run format",
     "build:wrapper": "tsup",
     "prepublishOnly": "napi prepublish -t npm",
-    "test": "vitest run",
+    "test": "vitest run --allowOnly",
     "test:hang": "vitest run --reporter=hanging-process",
     "universal": "napi universal",
     "version": "napi version",
