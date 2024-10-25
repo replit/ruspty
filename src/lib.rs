@@ -190,11 +190,20 @@ impl Pty {
         // and it's not safe to keep it open
         libc::close(raw_controller_fd);
 
+        // just to be safe, mark every single file descriptor as close-on-exec.
+        // needs to use the raw syscall to avoid dependencies on newer versions of glibc.
+        #[cfg(target_os = "linux")]
+        libc::syscall(
+          libc::SYS_close_range,
+          3,
+          libc::c_uint::MAX,
+          libc::CLOSE_RANGE_CLOEXEC as c_int,
+        );
+
         // set input modes
         let user_fd = OwnedFd::from_raw_fd(raw_user_fd);
         if let Ok(mut termios) = termios::tcgetattr(&user_fd) {
           termios.input_flags |= termios::InputFlags::IUTF8;
-          termios::tcsetattr(&user_fd, SetArg::TCSANOW, &termios)?;
         }
 
         // reset signal handlers
@@ -234,7 +243,7 @@ impl Pty {
       let wait_result = child.wait();
 
       // try to wait for the controller fd to be fully read
-      // poll_controller_fd_until_read(raw_controller_fd);
+      poll_controller_fd_until_read(raw_controller_fd);
 
       // we don't drop the controller fd immediately
       // let pty.close() be responsible for closing it
