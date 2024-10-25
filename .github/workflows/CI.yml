@@ -66,6 +66,21 @@ jobs:
         shell: bash
       - name: Dump GLIBC symbols
         run: objdump -T *.node | grep GLIBC | sed 's/.*GLIBC_\([.0-9]*\).*/\1/g' | sort -Vu  
+
+      - name: strace
+        if: runner.os == 'Linux'  # This ensures the step only runs on Linux
+        run: |
+          sudo apt-get update && sudo apt-get install -y strace
+          
+          # Run tests with strace and save full output
+          strace -f -e trace=desc -e signal=none -e fault=none -s 100 npm run test 2> strace.log
+      - name: Upload strace logs
+        if: runner.os == 'Linux' && always()  # Only upload on Linux, but always do it if the step ran
+        uses: actions/upload-artifact@v4
+        with:
+          name: strace-logs
+          path: strace.log
+
       - name: Test bindings
         run: npm run test
       - name: Upload artifact

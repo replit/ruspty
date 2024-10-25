@@ -247,7 +247,7 @@ impl Pty {
 
       // we don't drop the controller fd immediately
       // let pty.close() be responsible for closing it
-      drop(user_fd);
+      // drop(user_fd);
 
       match wait_result {
         Ok(status) => {
