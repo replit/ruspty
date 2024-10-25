@@ -127,7 +127,8 @@ export class Pty {
           // is nothing left to read and we can start tearing things down. If we hadn't received an
           // error so far, we are considered to be in good standing.
           this.read.off('error', handleError);
-          this.#socket.emit('end');
+          console.log('eio emit')
+          // this.#socket.end();
           return;
         }
       }
