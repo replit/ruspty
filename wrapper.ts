@@ -47,7 +47,7 @@ export class Pty {
   #fd: number;
 
   #handledClose: boolean = false;
-  #handledEndOfData: boolean = false;
+  #fdClosed: boolean = false;
 
   #socket: ReadStream;
   #writable: Writable;
@@ -73,7 +73,6 @@ export class Pty {
       markReadFinished = resolve;
     });
     const mockedExit = (error: NodeJS.ErrnoException | null, code: number) => {
-      console.log('mocked exit');
       markExited({ error, code });
     };
 
@@ -92,27 +91,23 @@ export class Pty {
 
     // catch end events
     const handleClose = async () => {
-      if (this.#handledEndOfData) {
+      if (this.#fdClosed) {
         return;
       }
 
-      this.#handledEndOfData = true;
+      this.#fdClosed = true;
 
       // must wait for fd close and exit result before calling real exit
-      console.log('handle end');
       await readFinished;
       const result = await exitResult;
       realExit(result.error, result.code);
-      console.log('done');
     };
 
     this.read.on('end', () => {
-      console.log('end');
       markReadFinished();
     });
 
     this.read.on('close', () => {
-      console.log('close');
       handleClose();
     });
 
@@ -132,7 +127,6 @@ export class Pty {
           // is nothing left to read and we can start tearing things down. If we hadn't received an
           // error so far, we are considered to be in good standing.
           this.read.off('error', handleError);
-          console.log('eio');
           this.#socket.emit('end');
           return;
         }
@@ -154,7 +148,7 @@ export class Pty {
   }
 
   resize(size: Size) {
-    if (this.#handledClose || this.#handledEndOfData) {
+    if (this.#handledClose || this.#fdClosed) {
       return;
     }
 

@@ -308,6 +308,7 @@ describe(
         await vi.waitFor(() => expect(onExit).toHaveBeenCalledTimes(1));
         expect(onExit).toHaveBeenCalledWith(null, 0);
 
+        console.log(buffer.byteLength)
         const lines = buffer.toString().trim().split('\n');
         expect(lines.length).toBe(n + 1);
         for (let i = 0; i < n + 1; i++) {
