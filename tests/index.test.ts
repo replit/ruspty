@@ -1,7 +1,7 @@
 import { Pty, getCloseOnExec, setCloseOnExec } from '../wrapper';
 import { type Writable } from 'stream';
 import { readdirSync, readlinkSync } from 'fs';
-import { describe, test, expect, beforeEach, afterEach, vi, type Mock } from 'vitest';
+import { describe, test, expect, beforeEach, afterEach, vi, type Mock, onTestFinished } from 'vitest';
 import { exec as execAsync } from 'child_process';
 import { promisify } from 'util';
 const exec = promisify(execAsync);
@@ -286,6 +286,9 @@ describe(
     test.only(
       'ordering is correct',
       async () => {
+        console.log('-- start --')
+        onTestFinished(() => console.log('-- end --'));
+
         const oldFds = getOpenFds();
         let buffer = Buffer.from('');
         const n = 1024;
@@ -308,8 +311,6 @@ describe(
 
         await vi.waitFor(() => expect(onExit).toHaveBeenCalledTimes(1));
         expect(onExit).toHaveBeenCalledWith(null, 0);
-        console.log(readStream.readableEnded)
-        // expect(readStream.readableEnded).toBe(true);
 
         const lines = buffer.toString().trim().split('\n');
         expect(lines.length).toBe(n + 1);
