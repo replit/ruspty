@@ -1,6 +1,12 @@
 import { type Readable, Writable } from 'node:stream';
 import { ReadStream } from 'node:tty';
-import { Pty as RawPty, ptyResize, type Size } from './index.js';
+import {
+  Pty as RawPty,
+  type Size,
+  setCloseOnExec as rawSetCloseOnExec,
+  getCloseOnExec as rawGetCloseOnExec,
+  ptyResize,
+} from './index.js';
 import { type PtyOptions as RawOptions } from './index.js';
 
 export type PtyOptions = RawOptions;
@@ -10,13 +16,41 @@ type ExitResult = {
   code: number;
 };
 
+/**
+ * A very thin wrapper around PTYs and processes.
+ *
+ * @example
+ * const { Pty } = require('@replit/ruspty');
+ * const fs = require('fs');
+ *
+ * const pty = new Pty({
+ *   command: '/bin/sh',
+ *   args: [],
+ *   envs: ENV,
+ *   dir: CWD,
+ *   size: { rows: 24, cols: 80 },
+ *   onExit: (...result) => {
+ *     // TODO: Handle process exit.
+ *   },
+ * });
+ *
+ * const read = pty.read;
+ * const write = pty.write;
+ *
+ * read.on('data', (chunk) => {
+ *   // TODO: Handle data.
+ * });
+ * write.write('echo hello\n');
+ */
 export class Pty {
   #pty: RawPty;
   #fd: number;
+
+  #handledClose: boolean = false;
+  #fdClosed: boolean = false;
+
   #socket: ReadStream;
   #writable: Writable;
-  #pendingExit: ExitResult | null = null;
-  #ended = false;
 
   get read(): Readable {
     return this.#socket;
@@ -29,19 +63,25 @@ export class Pty {
   constructor(options: PtyOptions) {
     const realExit = options.onExit;
 
-    // Create a proxy exit handler that coordinates with stream end
-    const handleExit = (error: NodeJS.ErrnoException | null, code: number) => {
-      const result = { error, code };
-      if (this.#ended) {
-        // Stream already ended, safe to call exit immediately
-        realExit(error, code);
-      } else {
-        // Store exit result until stream ends
-        this.#pendingExit = result;
-      }
+    let markExited: (value: ExitResult) => void;
+    let exitResult: Promise<ExitResult> = new Promise((resolve) => {
+      markExited = resolve;
+    });
+
+    let markReadFinished: () => void;
+    let readFinished = new Promise<void>((resolve) => {
+      markReadFinished = resolve;
+    });
+    const mockedExit = (error: NodeJS.ErrnoException | null, code: number) => {
+      markExited({ error, code });
     };
 
-    this.#pty = new RawPty({ ...options, onExit: handleExit });
+    // when pty exits, we should wait until the fd actually ends (end OR error)
+    // before closing the pty
+    // we use a mocked exit function to capture the exit result
+    // and then call the real exit function after the fd is fully read
+    this.#pty = new RawPty({ ...options, onExit: mockedExit });
+    // Transfer ownership of the FD to us.
     this.#fd = this.#pty.takeFd();
 
     this.#socket = new ReadStream(this.#fd);
@@ -49,27 +89,50 @@ export class Pty {
       write: this.#socket.write.bind(this.#socket),
     });
 
-    // Handle stream end
-    this.read.on('end', () => {
-      this.#ended = true;
-      if (this.#pendingExit) {
-        // Process already exited, now safe to call exit callback
-        const { error, code } = this.#pendingExit;
-        realExit(error, code);
+    // catch end events
+    const handleClose = async () => {
+      if (this.#fdClosed) {
+        return;
       }
+
+      this.#fdClosed = true;
+
+      // must wait for fd close and exit result before calling real exit
+      await readFinished;
+      const result = await exitResult;
+      realExit(result.error, result.code);
+    };
+
+    this.read.on('end', () => {
+      markReadFinished();
     });
 
-    // Filter expected PTY errors
+    this.read.on('close', () => {
+      handleClose();
+    });
+
+    // PTYs signal their done-ness with an EIO error. we therefore need to filter them out (as well as
+    // cleaning up other spurious errors) so that the user doesn't need to handle them and be in
+    // blissful peace.
     const handleError = (err: NodeJS.ErrnoException) => {
       if (err.code) {
-        if (err.code === 'EINTR' || err.code === 'EAGAIN') {
+        const code = err.code;
+        if (code === 'EINTR' || code === 'EAGAIN') {
+          // these two are expected. EINTR happens when the kernel restarts a `read(2)`/`write(2)`
+          // syscall due to it being interrupted by another syscall, and EAGAIN happens when there
+          // is no more data to be read by the fd.
           return;
-        } else if (err.code.indexOf('EIO') !== -1) {
+        } else if (code.indexOf('EIO') !== -1) {
+          // EIO only happens when the child dies. It is therefore our only true signal that there
+          // is nothing left to read and we can start tearing things down. If we hadn't received an
+          // error so far, we are considered to be in good standing.
           this.read.off('error', handleError);
           this.#socket.emit('end');
           return;
         }
       }
+
+      // if we haven't handled the error by now, we should throw it
       throw err;
     };
 
@@ -77,20 +140,29 @@ export class Pty {
   }
 
   close() {
-    // Use end() instead of destroy() to allow reading remaining data
+    this.#handledClose = true;
+
+    // end instead of destroy so that the user can read the last bits of data
+    // and allow graceful close event to mark the fd as ended
     this.#socket.end();
   }
 
   resize(size: Size) {
-    if (!this.#ended) {
-      try {
-        ptyResize(this.#fd, size);
-      } catch (e: unknown) {
-        if (e instanceof Error && 'code' in e && e.code === 'EBADF') {
-          return;
-        }
-        throw e;
+    if (this.#handledClose || this.#fdClosed) {
+      return;
+    }
+
+    try {
+      ptyResize(this.#fd, size);
+    } catch (e: unknown) {
+      if (e instanceof Error && 'code' in e && e.code === 'EBADF') {
+        // EBADF means the file descriptor is invalid. This can happen if the PTY has already
+        // exited but we don't know about it yet. In that case, we just ignore the error.
+        return;
       }
+
+      // otherwise, rethrow
+      throw e;
     }
   }
 
@@ -98,3 +170,15 @@ export class Pty {
     return this.#pty.pid;
   }
 }
+
+/**
+ * Set the close-on-exec flag on a file descriptor. This is `fcntl(fd, F_SETFD, FD_CLOEXEC)` under
+ * the covers.
+ */
+export const setCloseOnExec = rawSetCloseOnExec;
+
+/**
+ * Get the close-on-exec flag on a file descriptor. This is `fcntl(fd, F_GETFD) & FD_CLOEXEC ==
+ * FD_CLOEXEC` under the covers.
+ */
+export const getCloseOnExec = rawGetCloseOnExec;
