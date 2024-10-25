@@ -240,14 +240,12 @@ impl Pty {
       .create_threadsafe_function(0, |ctx| ctx.env.create_int32(ctx.value).map(|v| vec![v]))?;
 
     thread::spawn(move || {
+      drop(user_fd);
+
       let wait_result = child.wait();
 
       // try to wait for the controller fd to be fully read
       poll_controller_fd_until_read(raw_controller_fd);
-
-      // we don't drop the controller fd immediately
-      // let pty.close() be responsible for closing it
-      // drop(user_fd);
 
       match wait_result {
         Ok(status) => {
