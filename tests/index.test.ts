@@ -302,7 +302,7 @@ describe(
 
         const readStream = pty.read;
         readStream.on('data', (data) => {
-          console.log('data', data.toString());
+          console.log('data', data.byteLength);
           buffer = Buffer.concat([buffer, data]);
         });
 
