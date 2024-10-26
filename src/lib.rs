@@ -242,12 +242,31 @@ impl Pty {
       .create_threadsafe_function(0, |ctx| ctx.env.create_int32(ctx.value).map(|v| vec![v]))?;
 
     thread::spawn(move || {
-      drop(user_fd);
-
       let wait_result = child.wait();
 
       // try to wait for the controller fd to be fully read
       poll_controller_fd_until_read(raw_controller_fd);
+
+      // check TIOCOUTQ to see if there is any data left to be read
+      let mut user_outq = 0;
+      let user_tiocoutq_res = unsafe { libc::ioctl(raw_user_fd, libc::TIOCOUTQ, &mut user_outq) };
+      if user_tiocoutq_res == -1 {
+        eprintln!("ioctl TIOCOUTQ failed: {}", user_tiocoutq_res);
+      }
+
+      let mut controller_outq = 0;
+      let controller_tiocoutq_res =
+        unsafe { libc::ioctl(raw_controller_fd, libc::TIOCOUTQ, &mut controller_outq) };
+      if controller_tiocoutq_res == -1 {
+        eprintln!("ioctl TIOCOUTQ failed: {}", controller_tiocoutq_res);
+      }
+
+      println!(
+        "child process exited, user_outq: {}, controller_outq: {}",
+        user_outq, controller_outq
+      );
+
+      drop(user_fd);
 
       match wait_result {
         Ok(status) => {
