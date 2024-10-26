@@ -261,9 +261,22 @@ impl Pty {
         eprintln!("ioctl TIOCOUTQ failed: {}", controller_tiocoutq_res);
       }
 
+      let mut user_inq = 0;
+      let user_tiocinq_res = unsafe { libc::ioctl(raw_user_fd, libc::FIONREAD, &mut user_inq) };
+      if user_tiocinq_res == -1 {
+        eprintln!("ioctl TIOCINQ failed: {}", user_tiocinq_res);
+      }
+
+      let mut controller_inq = 0;
+      let controller_tiocinq_res =
+        unsafe { libc::ioctl(raw_controller_fd, libc::FIONREAD, &mut controller_inq) };
+      if controller_tiocinq_res == -1 {
+        eprintln!("ioctl TIOCINQ failed: {}", controller_tiocinq_res);
+      }
+
       println!(
-        "child process exited, user_outq: {}, controller_outq: {}",
-        user_outq, controller_outq
+        "user_outq: {}, controller_outq: {}, user_inq: {}, controller_inq: {}",
+        user_outq, controller_outq, user_inq, controller_inq
       );
 
       drop(user_fd);
