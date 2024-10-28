@@ -72,44 +72,42 @@ fn poll_pty_fds_until_read(controller_fd: RawFd, user_fd: RawFd) {
     .build();
 
   loop {
-    // Check both input and output queues for both FDs
+    // check both input and output queues for both FDs
     let mut controller_inq: i32 = 0;
     let mut controller_outq: i32 = 0;
     let mut user_inq: i32 = 0;
     let mut user_outq: i32 = 0;
 
-    // Safe because we're passing valid file descriptors and properly sized integers
+    // safe because we're passing valid file descriptors and properly sized integers
     unsafe {
-      // Check bytes waiting to be read (FIONREAD, equivalent to TIOCINQ on Linux)
+      // check bytes waiting to be read (FIONREAD, equivalent to TIOCINQ on Linux)
       if ioctl(controller_fd, FIONREAD, &mut controller_inq) < 0
         || ioctl(user_fd, FIONREAD, &mut user_inq) < 0
       {
         // break if we can't read
-        println!("ioctl failed FIONREAD");
         break;
       }
 
-      // Check bytes waiting to be written (TIOCOUTQ)
+      // check bytes waiting to be written (TIOCOUTQ)
       if ioctl(controller_fd, TIOCOUTQ, &mut controller_outq) < 0
         || ioctl(user_fd, TIOCOUTQ, &mut user_outq) < 0
       {
         // break if we can't read
-        println!("ioctl failed TIOCOUTQ");
         break;
       }
     }
 
-    // If all queues are empty, we're done
+    // if all queues are empty, we're done
     if controller_inq == 0 && controller_outq == 0 && user_inq == 0 && user_outq == 0 {
       break;
     }
 
-    // Apply backoff strategy
+    // apply backoff strategy
     if let Some(d) = backoff.next_backoff() {
       thread::sleep(d);
       continue;
     } else {
-      // We have exhausted our attempts
+      // we have exhausted our attempts
       break;
     }
   }
@@ -257,39 +255,6 @@ impl Pty {
 
       // try to wait for the controller fd to be fully read
       poll_pty_fds_until_read(raw_controller_fd, raw_user_fd);
-
-      // // check TIOCOUTQ to see if there is any data left to be read
-      // let mut user_outq = 0;
-      // let user_tiocoutq_res = unsafe { libc::ioctl(raw_user_fd, libc::TIOCOUTQ, &mut user_outq) };
-      // if user_tiocoutq_res == -1 {
-      //   eprintln!("ioctl TIOCOUTQ failed: {}", user_tiocoutq_res);
-      // }
-      //
-      // let mut controller_outq = 0;
-      // let controller_tiocoutq_res =
-      //   unsafe { libc::ioctl(raw_controller_fd, libc::TIOCOUTQ, &mut controller_outq) };
-      // if controller_tiocoutq_res == -1 {
-      //   eprintln!("ioctl TIOCOUTQ failed: {}", controller_tiocoutq_res);
-      // }
-      //
-      // let mut user_inq = 0;
-      // let user_tiocinq_res = unsafe { libc::ioctl(raw_user_fd, libc::FIONREAD, &mut user_inq) };
-      // if user_tiocinq_res == -1 {
-      //   eprintln!("ioctl TIOCINQ failed: {}", user_tiocinq_res);
-      // }
-      //
-      // let mut controller_inq = 0;
-      // let controller_tiocinq_res =
-      //   unsafe { libc::ioctl(raw_controller_fd, libc::FIONREAD, &mut controller_inq) };
-      // if controller_tiocinq_res == -1 {
-      //   eprintln!("ioctl TIOCINQ failed: {}", controller_tiocinq_res);
-      // }
-      //
-      // println!(
-      //   "user_outq: {}, controller_outq: {}, user_inq: {}, controller_inq: {}",
-      //   user_outq, controller_outq, user_inq, controller_inq
-      // );
-
       drop(user_fd);
 
       match wait_result {
