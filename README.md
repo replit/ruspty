@@ -4,7 +4,6 @@ A very thin wrapper around PTYs and processes.
 
 ```ts
 const { Pty } = require('@replit/ruspty');
-const fs = require('fs');
 
 const pty = new Pty({
   command: '/bin/sh',
