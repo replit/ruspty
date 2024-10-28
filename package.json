@@ -39,7 +39,7 @@
     "build": "napi build --platform --release && npm run build:wrapper && npm run format",
     "build:wrapper": "tsup",
     "prepublishOnly": "napi prepublish -t npm",
-    "test": "vitest run --allowOnly",
+    "test": "vitest run",
     "test:hang": "vitest run --reporter=hanging-process",
     "universal": "napi universal",
     "version": "napi version",
