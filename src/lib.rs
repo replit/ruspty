@@ -81,16 +81,16 @@ fn poll_pty_fds_until_read(controller_fd: RawFd, user_fd: RawFd) {
     // safe because we're passing valid file descriptors and properly sized integers
     unsafe {
       // check bytes waiting to be read (FIONREAD, equivalent to TIOCINQ on Linux)
-      if ioctl(controller_fd, FIONREAD, &mut controller_inq) < 0
-        || ioctl(user_fd, FIONREAD, &mut user_inq) < 0
+      if ioctl(controller_fd, FIONREAD, &mut controller_inq) == -1
+        || ioctl(user_fd, FIONREAD, &mut user_inq) == -1
       {
         // break if we can't read
         break;
       }
 
       // check bytes waiting to be written (TIOCOUTQ)
-      if ioctl(controller_fd, TIOCOUTQ, &mut controller_outq) < 0
-        || ioctl(user_fd, TIOCOUTQ, &mut user_outq) < 0
+      if ioctl(controller_fd, TIOCOUTQ, &mut controller_outq) == -1
+        || ioctl(user_fd, TIOCOUTQ, &mut user_outq) == -1
       {
         // break if we can't read
         break;
