@@ -63,12 +63,12 @@ export class Pty {
   constructor(options: PtyOptions) {
     const realExit = options.onExit;
 
-    let markExited: (value: ExitResult) => void;
+    let markExited!: (value: ExitResult) => void;
     let exitResult: Promise<ExitResult> = new Promise((resolve) => {
       markExited = resolve;
     });
 
-    let markReadFinished: () => void;
+    let markReadFinished!: () => void;
     let readFinished = new Promise<void>((resolve) => {
       markReadFinished = resolve;
     });
@@ -103,13 +103,8 @@ export class Pty {
       realExit(result.error, result.code);
     };
 
-    this.read.once('end', () => {
-      markReadFinished();
-    });
-
-    this.read.once('close', () => {
-      handleClose();
-    });
+    this.read.once('end', markReadFinished);
+    this.read.once('close', handleClose);
 
     // PTYs signal their done-ness with an EIO error. we therefore need to filter them out (as well as
     // cleaning up other spurious errors) so that the user doesn't need to handle them and be in
