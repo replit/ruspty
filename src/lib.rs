@@ -11,53 +11,15 @@ use std::time::Duration;
 
 use backoff::backoff::Backoff;
 use backoff::ExponentialBackoffBuilder;
-use libc::{self, c_int, c_ulong};
 use napi::bindgen_prelude::JsFunction;
 use napi::threadsafe_function::{ErrorStrategy, ThreadsafeFunction, ThreadsafeFunctionCallMode};
 use napi::Status::GenericFailure;
 use napi::{self, Env};
 use nix::errno::Errno;
 use nix::fcntl::{fcntl, FcntlArg, FdFlag, OFlag};
-use nix::libc::{FIONREAD, TIOCOUTQ, TIOCSCTTY, TIOCSWINSZ};
+use nix::libc::{self, c_int, ioctl, FIONREAD, TIOCOUTQ, TIOCSCTTY, TIOCSWINSZ};
 use nix::pty::{openpty, Winsize};
 use nix::sys::termios::{self, SetArg};
-use nix::{ioctl_none, ioctl_read, ioctl_write_ptr};
-
-fn ioctl_seq_from_ident(ident: c_ulong) -> u8 {
-  (ident & 0xff) as u8
-}
-
-// define the ioctls using nix::sys::ioctl macro
-const TIOCSCTTY_IDENT: c_ulong = TIOCSCTTY as c_ulong;
-ioctl_none!(
-  tiocsctty,
-  TIOCSCTTY_IDENT,
-  ioctl_seq_from_ident(TIOCSCTTY_IDENT)
-);
-
-const TIOCSWINSZ_IDENT: c_ulong = TIOCSWINSZ;
-ioctl_write_ptr!(
-  tiocswinsz,
-  TIOCSWINSZ_IDENT,
-  ioctl_seq_from_ident(TIOCSWINSZ_IDENT),
-  Winsize
-);
-
-const TIOCOUTQ_IDENT: c_ulong = TIOCOUTQ;
-ioctl_read!(
-  tiocoutq,
-  TIOCOUTQ_IDENT,
-  ioctl_seq_from_ident(TIOCOUTQ_IDENT),
-  c_int
-);
-
-const TIOCINQ_IDENT: c_ulong = FIONREAD;
-ioctl_read!(
-  tiocinq,
-  TIOCINQ_IDENT,
-  ioctl_seq_from_ident(TIOCINQ_IDENT),
-  c_int
-);
 
 #[macro_use]
 extern crate napi_derive;
@@ -115,17 +77,19 @@ fn poll_pty_fds_until_read(controller_fd: RawFd, user_fd: RawFd) {
 
     // safe because we're passing valid file descriptors and properly sized integers
     unsafe {
-      // check bytes waiting to be read (TIOCINQ on Linux)
-      if tiocinq(controller_fd, &mut controller_inq).is_err()
-        || tiocinq(user_fd, &mut user_inq).is_err()
+      // check bytes waiting to be read (FIONREAD, equivalent to TIOCINQ on Linux)
+      if ioctl(controller_fd, FIONREAD, &mut controller_inq) == -1
+        || ioctl(user_fd, FIONREAD, &mut user_inq) == -1
       {
+        // break if we can't read
         break;
       }
 
       // check bytes waiting to be written (TIOCOUTQ)
-      if tiocoutq(controller_fd, &mut controller_outq).is_err()
-        || tiocoutq(user_fd, &mut user_outq).is_err()
+      if ioctl(controller_fd, TIOCOUTQ, &mut controller_outq) == -1
+        || ioctl(user_fd, TIOCOUTQ, &mut user_outq) == -1
       {
+        // break if we can't read
         break;
       }
     }
@@ -224,8 +188,9 @@ impl Pty {
         }
 
         // become the controlling tty for the program
-        if let Err(err) = tiocsctty(raw_user_fd) {
-          return Err(Error::new(ErrorKind::Other, format!("ioctl-TIOCSCTTY: {}", err)));
+        let err = libc::ioctl(raw_user_fd, TIOCSCTTY.into(), 0);
+        if err == -1 {
+          return Err(Error::new(ErrorKind::Other, "ioctl-TIOCSCTTY"));
         }
 
         // we need to drop the controller fd, since we don't need it in the child
@@ -349,8 +314,12 @@ fn pty_resize(fd: i32, size: Size) -> Result<(), napi::Error> {
     ws_ypixel: 0,
   };
 
-  unsafe {
-    tiocswinsz(fd, &window_size).map_err(cast_to_napi_error)?;
+  let res = unsafe { libc::ioctl(fd, TIOCSWINSZ, &window_size as *const _) };
+  if res == -1 {
+    return Err(napi::Error::new(
+      napi::Status::GenericFailure,
+      format!("ioctl TIOCSWINSZ failed: {}", Error::last_os_error()),
+    ));
   }
 
   Ok(())
