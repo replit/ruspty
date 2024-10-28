@@ -20,7 +20,7 @@ use napi::Status::GenericFailure;
 use napi::{self, Env};
 use nix::errno::Errno;
 use nix::fcntl::{fcntl, FcntlArg, FdFlag, OFlag};
-use nix::poll::{poll, PollFd, PollFlags, PollTimeout};
+use nix::libc::{FIONREAD, TIOCOUTQ, ioctl};
 use nix::pty::{openpty, Winsize};
 use nix::sys::termios::{self, SetArg};
 
@@ -60,14 +60,11 @@ fn cast_to_napi_error(err: Errno) -> napi::Error {
   napi::Error::new(GenericFailure, err)
 }
 
-// if the child process exits before the controller fd is fully read, we might accidentally
-// end in a case where onExit is called but js hasn't had the chance to fully read the controller fd
+// if the child process exits before the controller fd is fully read or the user fd is fully
+// flushed, we might accidentally end in a case where onExit is called but js hasn't had
+// the chance to fully read the controller fd
 // let's wait until the controller fd is fully read before we call onExit
-fn poll_controller_fd_until_read(raw_fd: RawFd) {
-  // wait until fd is fully read (i.e. POLLIN no longer set)
-  let borrowed_fd = unsafe { BorrowedFd::borrow_raw(raw_fd) };
-  let poll_fd = PollFd::new(borrowed_fd, PollFlags::POLLIN);
-
+fn poll_pty_fds_until_read(controller_fd: RawFd, user_fd: RawFd) {
   let mut backoff = ExponentialBackoffBuilder::default()
     .with_initial_interval(Duration::from_millis(1))
     .with_max_interval(Duration::from_millis(100))
@@ -75,30 +72,44 @@ fn poll_controller_fd_until_read(raw_fd: RawFd) {
     .build();
 
   loop {
-    if let Err(err) = poll(&mut [poll_fd], PollTimeout::ZERO) {
-      if err == Errno::EINTR || err == Errno::EAGAIN {
-        // we were interrupted, so we should just try again
-        continue;
+    // Check both input and output queues for both FDs
+    let mut controller_inq: i32 = 0;
+    let mut controller_outq: i32 = 0;
+    let mut user_inq: i32 = 0;
+    let mut user_outq: i32 = 0;
+
+    // Safe because we're passing valid file descriptors and properly sized integers
+    unsafe {
+      // Check bytes waiting to be read (FIONREAD, equivalent to TIOCINQ on Linux)
+      if ioctl(controller_fd, FIONREAD, &mut controller_inq) < 0
+        || ioctl(user_fd, FIONREAD, &mut user_inq) < 0
+      {
+        // break if we can't read
+        println!("ioctl failed FIONREAD");
+        break;
       }
 
-      // we should almost never hit this, but if we do, we should just break out of the loop. this
-      // can happen if Node destroys the terminal before waiting for the child process to go away.
-      break;
-    }
-
-    // check if POLLIN is no longer set (i.e. there is no more data to read)
-    if let Some(flags) = poll_fd.revents() {
-      if !flags.contains(PollFlags::POLLIN) {
+      // Check bytes waiting to be written (TIOCOUTQ)
+      if ioctl(controller_fd, TIOCOUTQ, &mut controller_outq) < 0
+        || ioctl(user_fd, TIOCOUTQ, &mut user_outq) < 0
+      {
+        // break if we can't read
+        println!("ioctl failed TIOCOUTQ");
         break;
       }
     }
 
-    // wait for a bit before trying again
+    // If all queues are empty, we're done
+    if controller_inq == 0 && controller_outq == 0 && user_inq == 0 && user_outq == 0 {
+      break;
+    }
+
+    // Apply backoff strategy
     if let Some(d) = backoff.next_backoff() {
       thread::sleep(d);
       continue;
     } else {
-      // we have exhausted our attempts, its joever
+      // We have exhausted our attempts
       break;
     }
   }
@@ -245,39 +256,39 @@ impl Pty {
       let wait_result = child.wait();
 
       // try to wait for the controller fd to be fully read
-      poll_controller_fd_until_read(raw_controller_fd);
+      poll_pty_fds_until_read(raw_controller_fd, raw_user_fd);
 
-      // check TIOCOUTQ to see if there is any data left to be read
-      let mut user_outq = 0;
-      let user_tiocoutq_res = unsafe { libc::ioctl(raw_user_fd, libc::TIOCOUTQ, &mut user_outq) };
-      if user_tiocoutq_res == -1 {
-        eprintln!("ioctl TIOCOUTQ failed: {}", user_tiocoutq_res);
-      }
-
-      let mut controller_outq = 0;
-      let controller_tiocoutq_res =
-        unsafe { libc::ioctl(raw_controller_fd, libc::TIOCOUTQ, &mut controller_outq) };
-      if controller_tiocoutq_res == -1 {
-        eprintln!("ioctl TIOCOUTQ failed: {}", controller_tiocoutq_res);
-      }
-
-      let mut user_inq = 0;
-      let user_tiocinq_res = unsafe { libc::ioctl(raw_user_fd, libc::FIONREAD, &mut user_inq) };
-      if user_tiocinq_res == -1 {
-        eprintln!("ioctl TIOCINQ failed: {}", user_tiocinq_res);
-      }
-
-      let mut controller_inq = 0;
-      let controller_tiocinq_res =
-        unsafe { libc::ioctl(raw_controller_fd, libc::FIONREAD, &mut controller_inq) };
-      if controller_tiocinq_res == -1 {
-        eprintln!("ioctl TIOCINQ failed: {}", controller_tiocinq_res);
-      }
-
-      println!(
-        "user_outq: {}, controller_outq: {}, user_inq: {}, controller_inq: {}",
-        user_outq, controller_outq, user_inq, controller_inq
-      );
+      // // check TIOCOUTQ to see if there is any data left to be read
+      // let mut user_outq = 0;
+      // let user_tiocoutq_res = unsafe { libc::ioctl(raw_user_fd, libc::TIOCOUTQ, &mut user_outq) };
+      // if user_tiocoutq_res == -1 {
+      //   eprintln!("ioctl TIOCOUTQ failed: {}", user_tiocoutq_res);
+      // }
+      //
+      // let mut controller_outq = 0;
+      // let controller_tiocoutq_res =
+      //   unsafe { libc::ioctl(raw_controller_fd, libc::TIOCOUTQ, &mut controller_outq) };
+      // if controller_tiocoutq_res == -1 {
+      //   eprintln!("ioctl TIOCOUTQ failed: {}", controller_tiocoutq_res);
+      // }
+      //
+      // let mut user_inq = 0;
+      // let user_tiocinq_res = unsafe { libc::ioctl(raw_user_fd, libc::FIONREAD, &mut user_inq) };
+      // if user_tiocinq_res == -1 {
+      //   eprintln!("ioctl TIOCINQ failed: {}", user_tiocinq_res);
+      // }
+      //
+      // let mut controller_inq = 0;
+      // let controller_tiocinq_res =
+      //   unsafe { libc::ioctl(raw_controller_fd, libc::FIONREAD, &mut controller_inq) };
+      // if controller_tiocinq_res == -1 {
+      //   eprintln!("ioctl TIOCINQ failed: {}", controller_tiocinq_res);
+      // }
+      //
+      // println!(
+      //   "user_outq: {}, controller_outq: {}, user_inq: {}, controller_inq: {}",
+      //   user_outq, controller_outq, user_inq, controller_inq
+      // );
 
       drop(user_fd);
 
