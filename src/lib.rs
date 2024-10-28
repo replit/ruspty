@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::Error;
+use std::io::{Error, Write};
 use std::io::ErrorKind;
 use std::os::fd::{AsRawFd, OwnedFd};
 use std::os::fd::{FromRawFd, IntoRawFd, RawFd};
