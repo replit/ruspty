@@ -1,11 +1,9 @@
 use std::collections::HashMap;
 use std::fs::File;
-use std::io;
 use std::io::Error;
 use std::io::ErrorKind;
-use std::io::Write;
 use std::os::fd::{AsRawFd, OwnedFd};
-use std::os::fd::{BorrowedFd, FromRawFd, IntoRawFd, RawFd};
+use std::os::fd::{FromRawFd, IntoRawFd, RawFd};
 use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
 use std::thread;
