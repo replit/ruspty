@@ -1,6 +1,6 @@
 {
   "name": "@replit/ruspty",
-  "version": "3.3.0",
+  "version": "3.4.0",
   "main": "dist/wrapper.js",
   "types": "dist/wrapper.d.ts",
   "author": "Szymon Kaliski <hi@szymonkaliski.com>",
@@ -36,7 +36,7 @@
   },
   "scripts": {
     "artifacts": "napi artifacts",
-    "build": "napi build --platform --release && npm run build:wrapper",
+    "build": "napi build --platform --release && npm run build:wrapper && npm run format",
     "build:wrapper": "tsup",
     "prepublishOnly": "napi prepublish -t npm",
     "test": "vitest run",
