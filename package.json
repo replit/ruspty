@@ -1,6 +1,6 @@
 {
   "name": "@replit/ruspty",
-  "version": "3.4.0",
+  "version": "3.4.1",
   "main": "dist/wrapper.js",
   "types": "dist/wrapper.d.ts",
   "author": "Szymon Kaliski <hi@szymonkaliski.com>",
@@ -25,7 +25,7 @@
   },
   "license": "MIT",
   "devDependencies": {
-    "@napi-rs/cli": "^2.18.2",
+    "@napi-rs/cli": "^2.18.4",
     "@napi-rs/triples": "^1.2.0",
     "@types/jest": "^29.5.11",
     "@types/node": "^20.14.2",
