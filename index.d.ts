@@ -31,7 +31,7 @@ export function setCloseOnExec(fd: number, closeOnExec: boolean): void;
  *_CLOEXEC` under the covers.
  */
 export function getCloseOnExec(fd: number): boolean;
-export class Pty {
+export declare class Pty {
   /** The pid of the forked process. */
   pid: number;
   constructor(opts: PtyOptions);
