@@ -151,7 +151,10 @@ export class Pty {
     try {
       ptyResize(this.#fd, size);
     } catch (e: unknown) {
-      if (e instanceof Error && 'code' in e && e.code === 'EBADF') {
+      // napi-rs only throws strings so we must string match here
+      // https://docs.rs/napi/latest/napi/struct.Error.html#method.new
+      if (e instanceof Error && e.message.indexOf('os error 9') !== -1) {
+        // error 9 is EBADF
         // EBADF means the file descriptor is invalid. This can happen if the PTY has already
         // exited but we don't know about it yet. In that case, we just ignore the error.
         return;
