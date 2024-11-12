@@ -24,8 +24,6 @@ read.on('data', (chunk) => {
 write.write('echo hello\n');
 ```
 
-The biggest difference from existing PTY libraries is that this one works with Bun, and doesn't cross the FFI bridge for every input/output instead requiring the consumer to deal with the `fd` of the PTY.
-
 ## Local Development
 
 - `npm install`
