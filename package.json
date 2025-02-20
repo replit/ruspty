@@ -32,7 +32,7 @@
     "prettier": "^3.2.4",
     "tsup": "^8.1.0",
     "typescript": "^5.4.5",
-    "vitest": "^1.6.0"
+    "vitest": "^1.6.1"
   },
   "scripts": {
     "artifacts": "napi artifacts",
