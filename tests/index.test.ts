@@ -342,6 +342,51 @@ describe(
       expect(buffer.toString().length).toBe(payload.length);
     });
 
+    test('works with large unicode output', async () => {
+      const payload = `👍`.repeat(10000);
+      let buffer = Buffer.from('');
+      const onExit = vi.fn();
+
+      const pty = new Pty({
+        command: '/bin/echo',
+        args: [
+          '-n',
+          payload
+        ],
+        onExit,
+      });
+
+      const readStream = pty.read;
+      readStream.on('data', (data) => {
+        buffer = Buffer.concat([buffer, data]);
+      });
+
+      await vi.waitFor(() => expect(onExit).toHaveBeenCalledTimes(1));
+      expect(onExit).toHaveBeenCalledWith(null, 0);
+      expect(buffer.toString()).toBe(payload);
+    });
+
+    test('works with large unicode output 2', async () => {
+      const payload = `👍`.repeat(10000);
+      let buffer = Buffer.from('');
+      const onExit = vi.fn();
+
+      const pty = new Pty({
+        command: 'bash',
+        args: ['-c', `for i in $(seq 1 10000); do printf '👍'; done`],
+        onExit,
+      });
+
+      const readStream = pty.read;
+      readStream.on('data', (data) => {
+        buffer = Buffer.concat([buffer, data]);
+      });
+
+      await vi.waitFor(() => expect(onExit).toHaveBeenCalledTimes(1));
+      expect(onExit).toHaveBeenCalledWith(null, 0);
+      expect(buffer.toString()).toBe(payload);
+    });
+
     testSkipOnDarwin('does not leak files', async () => {
       const oldFds = getOpenFds();
       const promises = [];
