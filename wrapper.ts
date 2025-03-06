@@ -95,6 +95,7 @@ export class Pty {
       }
 
       this.#fdClosed = true;
+      this.#writable.end();
 
       // must wait for fd close and exit result before calling real exit
       await readFinished;
@@ -141,6 +142,7 @@ export class Pty {
     // end instead of destroy so that the user can read the last bits of data
     // and allow graceful close event to mark the fd as ended
     this.#socket.end();
+    this.#writable.end();
   }
 
   resize(size: Size) {

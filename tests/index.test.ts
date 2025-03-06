@@ -70,6 +70,8 @@ describe(
       expect(onExit).toHaveBeenCalledWith(null, 0);
       expect(buffer.trim()).toBe(message);
       expect(getOpenFds()).toStrictEqual(oldFds);
+      expect(pty.write.writable).toBe(false);
+      expect(pty.read.readable).toBe(false);
     });
 
     test('captures an exit code', async () => {
@@ -112,6 +114,7 @@ describe(
 
       await vi.waitFor(() => expect(onExit).toHaveBeenCalledTimes(1));
       expect(onExit).toHaveBeenCalledWith(null, 0);
+      expect(pty.write.writable).toBe(false);
       
       let result = buffer.toString();
       if (IS_DARWIN) {
@@ -281,6 +284,8 @@ describe(
       process.kill(pty.pid, 'SIGKILL');
       await vi.waitFor(() => expect(onExit).toHaveBeenCalledTimes(1));
       expect(onExit).toHaveBeenCalledWith(null, -1);
+      expect(pty.write.writable).toBe(false);
+      expect(pty.read.readable).toBe(false);
     });
 
     test(
