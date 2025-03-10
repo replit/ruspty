@@ -45,7 +45,7 @@ function getOpenFds(): FdRecord {
   return fds;
 }
 
-describe(
+describe.sequential(
   'PTY',
   { repeats: 500 },
   () => {
