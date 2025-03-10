@@ -128,6 +128,7 @@ describe(
     });
 
     test("cannot be written to after closing", async () => {
+      const oldFds = getOpenFds();
       const onExit = vi.fn();
       const pty = new Pty({
         command: '/bin/echo',
@@ -148,6 +149,7 @@ describe(
       expect(writeStream.writable).toBe(false);
       writeStream.write("hello");
       await expect(errorPromise).rejects.toThrowError(/write after end/);
+      expect(getOpenFds()).toStrictEqual(oldFds);
     });
 
     test('can be started in non-interactive fashion', async () => {
@@ -169,9 +171,6 @@ describe(
       await vi.waitFor(() => expect(onExit).toHaveBeenCalledTimes(1));
       expect(onExit).toHaveBeenCalledWith(null, 0);
 
-      // Add a delay to allow for file descriptor cleanup
-      await new Promise(resolve => setTimeout(resolve, 100));
-      
       let result = buffer.toString();
       const expectedResult = '\r\n';
       expect(result.trim()).toStrictEqual(expectedResult.trim());
