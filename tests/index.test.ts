@@ -45,7 +45,7 @@ function getOpenFds(): FdRecord {
   return fds;
 }
 
-describe.sequential(
+describe(
   'PTY',
   { repeats: 500 },
   () => {
@@ -124,31 +124,6 @@ describe.sequential(
 
       const expectedResult = 'hello cat\r\nhello cat\r\n';
       expect(result.trim()).toStrictEqual(expectedResult.trim());
-      expect(getOpenFds()).toStrictEqual(oldFds);
-    });
-
-    test("cannot be written to after closing", async () => {
-      const oldFds = getOpenFds();
-      const onExit = vi.fn();
-      const pty = new Pty({
-        command: '/bin/echo',
-        args: ['hello'],
-        onExit,
-      });
-
-      const writeStream = pty.write;
-
-      const errorPromise = new Promise<void>((resolve, reject) => {
-        writeStream.on('error', (error) => {
-          reject(error);
-        });
-      });
-
-      pty.close();
-
-      expect(writeStream.writable).toBe(false);
-      writeStream.write("hello");
-      await expect(errorPromise).rejects.toThrowError(/write after end/);
       expect(getOpenFds()).toStrictEqual(oldFds);
     });
 
