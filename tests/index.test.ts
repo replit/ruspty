@@ -127,6 +127,29 @@ describe(
       expect(getOpenFds()).toStrictEqual(oldFds);
     });
 
+    test("cannot be written to after closing", async () => {
+      const onExit = vi.fn();
+      const pty = new Pty({
+        command: '/bin/echo',
+        args: ['hello'],
+        onExit,
+      });
+
+      const writeStream = pty.write;
+
+      const errorPromise = new Promise<void>((resolve, reject) => {
+        writeStream.on('error', (error) => {
+          reject(error);
+        });
+      });
+
+      pty.close();
+
+      expect(writeStream.writable).toBe(false);
+      writeStream.write("hello");
+      await expect(errorPromise).rejects.toThrowError(/write after end/);
+    });
+
     test('can be started in non-interactive fashion', async () => {
       const oldFds = getOpenFds();
       let buffer = '';
