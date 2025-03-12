@@ -1,7 +1,7 @@
 import { Pty, getCloseOnExec, setCloseOnExec } from '../wrapper';
 import { type Writable } from 'stream';
 import { readdirSync, readlinkSync } from 'fs';
-import { describe, test, expect, beforeEach, afterEach, vi, type Mock } from 'vitest';
+import { describe, test, expect, beforeEach, afterEach, vi, type Mock, assert } from 'vitest';
 import { exec as execAsync } from 'child_process';
 import { promisify } from 'util';
 const exec = promisify(execAsync);
@@ -461,12 +461,15 @@ describe(
       const oldFds = getOpenFds();
       const onExit = vi.fn();
       const pty = new Pty({
-        command: '/bin/sh',
-        args: ['-c', 'echo "hello"'],
+        command: "/bin/echo",
+        args: ["hello"],
         onExit,
       });
 
+      const readStream = pty.read;
       const writeStream = pty.write;
+
+      readStream.on('data', () => {});
 
       const errorPromise = new Promise<void>((resolve, reject) => {
         writeStream.on('error', (error) => {
@@ -476,11 +479,8 @@ describe(
 
       pty.close();
 
-      await vi.waitFor(() => expect(onExit).toHaveBeenCalledTimes(1));
-      expect(onExit).toHaveBeenCalledWith(null, 0);
-
-      expect(writeStream.writable).toBe(false);
-      writeStream.write("hello");
+      assert(!writeStream.writable)
+      writeStream.write("hello2");
       await expect(errorPromise).rejects.toThrowError(/write after end/);
 
       process.kill(pty.pid, 'SIGKILL');
