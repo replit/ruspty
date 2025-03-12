@@ -45,7 +45,7 @@ function getOpenFds(): FdRecord {
   return fds;
 }
 
-describe.sequential(
+describe(
   'PTY',
   { repeats: 500 },
   () => {
@@ -125,29 +125,6 @@ describe.sequential(
       const expectedResult = 'hello cat\r\nhello cat\r\n';
       expect(result.trim()).toStrictEqual(expectedResult.trim());
       expect(getOpenFds()).toStrictEqual(oldFds);
-    });
-
-    test("cannot be written to after closing", async () => {
-      const onExit = vi.fn();
-      const pty = new Pty({
-        command: '/bin/echo',
-        args: ['hello'],
-        onExit,
-      });
-
-      const writeStream = pty.write;
-
-      const errorPromise = new Promise<void>((resolve, reject) => {
-        writeStream.on('error', (error) => {
-          reject(error);
-        });
-      });
-
-      pty.close();
-
-      expect(writeStream.writable).toBe(false);
-      writeStream.write("hello");
-      await expect(errorPromise).rejects.toThrowError(/write after end/);
     });
 
     test('can be started in non-interactive fashion', async () => {
@@ -478,6 +455,29 @@ describe.sequential(
       }).rejects.toThrow('No such file or directory');
 
       expect(getOpenFds()).toStrictEqual(oldFds);
+    });
+
+    test("cannot be written to after closing", async () => {
+      const onExit = vi.fn();
+      const pty = new Pty({
+        command: '/bin/sh',
+        args: ['-c', 'echo "hello"'],
+        onExit,
+      });
+
+      const writeStream = pty.write;
+
+      const errorPromise = new Promise<void>((resolve, reject) => {
+        writeStream.on('error', (error) => {
+          reject(error);
+        });
+      });
+
+      pty.close();
+
+      expect(writeStream.writable).toBe(false);
+      writeStream.write("hello");
+      await expect(errorPromise).rejects.toThrowError(/write after end/);
     });
   },
 );
