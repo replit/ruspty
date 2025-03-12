@@ -182,10 +182,7 @@ describe(
             expect(buffer).toContain('24 80');
             pty.resize({ rows: 60, cols: 100 });
 
-            // Add a delay to ensure the resize has taken effect
-            setTimeout(() => {
-              writeStream.write("stty size; echo 'done2'\n");
-            }, 200);
+            writeStream.write("stty size; echo 'done2'\n");
             return;
           }
 
