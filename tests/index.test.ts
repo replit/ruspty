@@ -482,8 +482,6 @@ describe(
       assert(!writeStream.writable)
       writeStream.write("hello2");
       await expect(errorPromise).rejects.toThrowError(/write after end/);
-
-      process.kill(pty.pid, 'SIGKILL');
       expect(getOpenFds()).toStrictEqual(oldFds);
     });
   },
