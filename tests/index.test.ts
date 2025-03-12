@@ -184,7 +184,7 @@ describe(
 
             // Add a delay to ensure the resize has taken effect
             setTimeout(() => {
-              writeStream.write("stty size; echo ' '\n");
+              writeStream.write("stty size; echo 'done2'\n");
             }, 200);
             return;
           }
