@@ -457,7 +457,8 @@ describe(
       expect(getOpenFds()).toStrictEqual(oldFds);
     });
 
-    test("cannot be written to after closing", async () => {
+    test.only("cannot be written to after closing", async () => {
+      const oldFds = getOpenFds();
       const onExit = vi.fn();
       const pty = new Pty({
         command: '/bin/sh',
@@ -475,9 +476,15 @@ describe(
 
       pty.close();
 
+      await vi.waitFor(() => expect(onExit).toHaveBeenCalledTimes(1));
+      expect(onExit).toHaveBeenCalledWith(null, 0);
+
       expect(writeStream.writable).toBe(false);
       writeStream.write("hello");
       await expect(errorPromise).rejects.toThrowError(/write after end/);
+
+      process.kill(pty.pid, 'SIGKILL');
+      expect(getOpenFds()).toStrictEqual(oldFds);
     });
   },
 );
