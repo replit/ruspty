@@ -483,11 +483,7 @@ describe(
       writeStream.write("hello2");
       await expect(errorPromise).rejects.toThrowError(/write after end/);
       
-      // Wait for the onExit callback to be called to ensure all cleanup is done
       await vi.waitFor(() => expect(onExit).toHaveBeenCalledTimes(1));
-      
-      // Add a small delay to allow file descriptors to be fully closed
-      await new Promise(resolve => setTimeout(resolve, 100));
       
       expect(getOpenFds()).toStrictEqual(oldFds);
     });
