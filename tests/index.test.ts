@@ -457,7 +457,7 @@ describe(
       expect(getOpenFds()).toStrictEqual(oldFds);
     });
 
-    test.only("cannot be written to after closing", async () => {
+    test("cannot be written to after closing", async () => {
       const oldFds = getOpenFds();
       const onExit = vi.fn();
       const pty = new Pty({
