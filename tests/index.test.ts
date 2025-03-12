@@ -47,7 +47,7 @@ function getOpenFds(): FdRecord {
 
 describe.sequential(
   'PTY',
-  // { repeats: 500 },
+  { repeats: 500 },
   () => {
     test('spawns and exits', async () => {
       const oldFds = getOpenFds();
