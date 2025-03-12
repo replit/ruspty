@@ -1,7 +1,7 @@
 import { Pty, getCloseOnExec, setCloseOnExec } from '../wrapper';
 import { type Writable } from 'stream';
 import { readdirSync, readlinkSync } from 'fs';
-import { describe, test, expect, beforeEach, afterEach, vi, type Mock } from 'vitest';
+import { describe, test, expect, beforeEach, afterEach, vi, type Mock, assert } from 'vitest';
 import { exec as execAsync } from 'child_process';
 import { promisify } from 'util';
 const exec = promisify(execAsync);
@@ -70,6 +70,8 @@ describe(
       expect(onExit).toHaveBeenCalledWith(null, 0);
       expect(buffer.trim()).toBe(message);
       expect(getOpenFds()).toStrictEqual(oldFds);
+      expect(pty.write.writable).toBe(false);
+      expect(pty.read.readable).toBe(false);
     });
 
     test('captures an exit code', async () => {
@@ -112,6 +114,7 @@ describe(
 
       await vi.waitFor(() => expect(onExit).toHaveBeenCalledTimes(1));
       expect(onExit).toHaveBeenCalledWith(null, 0);
+      expect(pty.write.writable).toBe(false);
       
       let result = buffer.toString();
       if (IS_DARWIN) {
@@ -142,6 +145,7 @@ describe(
 
       await vi.waitFor(() => expect(onExit).toHaveBeenCalledTimes(1));
       expect(onExit).toHaveBeenCalledWith(null, 0);
+
       let result = buffer.toString();
       const expectedResult = '\r\n';
       expect(result.trim()).toStrictEqual(expectedResult.trim());
@@ -281,6 +285,8 @@ describe(
       process.kill(pty.pid, 'SIGKILL');
       await vi.waitFor(() => expect(onExit).toHaveBeenCalledTimes(1));
       expect(onExit).toHaveBeenCalledWith(null, -1);
+      expect(pty.write.writable).toBe(false);
+      expect(pty.read.readable).toBe(false);
     });
 
     test(
@@ -448,6 +454,37 @@ describe(
         });
       }).rejects.toThrow('No such file or directory');
 
+      expect(getOpenFds()).toStrictEqual(oldFds);
+    });
+
+    test("cannot be written to after closing", async () => {
+      const oldFds = getOpenFds();
+      const onExit = vi.fn();
+      const pty = new Pty({
+        command: "/bin/echo",
+        args: ["hello"],
+        onExit,
+      });
+
+      const readStream = pty.read;
+      const writeStream = pty.write;
+
+      readStream.on('data', () => {});
+
+      const errorPromise = new Promise<void>((resolve, reject) => {
+        writeStream.on('error', (error) => {
+          reject(error);
+        });
+      });
+
+      pty.close();
+
+      assert(!writeStream.writable)
+      writeStream.write("hello2");
+      await expect(errorPromise).rejects.toThrowError(/write after end/);
+      
+      await vi.waitFor(() => expect(onExit).toHaveBeenCalledTimes(1));
+      
       expect(getOpenFds()).toStrictEqual(oldFds);
     });
   },
