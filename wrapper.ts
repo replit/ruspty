@@ -155,10 +155,13 @@ export class Pty {
     } catch (e: unknown) {
       // napi-rs only throws strings so we must string match here
       // https://docs.rs/napi/latest/napi/struct.Error.html#method.new
-      if (e instanceof Error && e.message.indexOf('os error 9') !== -1) {
-        // error 9 is EBADF
-        // EBADF means the file descriptor is invalid. This can happen if the PTY has already
-        // exited but we don't know about it yet. In that case, we just ignore the error.
+      if (e instanceof Error && 
+         (e.message.indexOf('os error 9') !== -1 || // EBADF
+          e.message.indexOf('os error 25') !== -1)) { // ENOTTY
+        // error 9 is EBADF (bad file descriptor)
+        // error 25 is ENOTTY (inappropriate ioctl for device)
+        // These can happen if the PTY has already exited or wasn't a terminal device
+        // In that case, we just ignore the error.
         return;
       }
 
