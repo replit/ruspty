@@ -1,4 +1,4 @@
-import { type Readable, type Writable } from 'node:stream';
+import type { Readable, Writable } from 'node:stream';
 import { ReadStream } from 'node:tty';
 import {
   Pty as RawPty,
