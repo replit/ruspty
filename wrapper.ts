@@ -1,4 +1,4 @@
-import { type Readable, Writable } from 'node:stream';
+import { type Readable, type Writable } from 'node:stream';
 import { ReadStream } from 'node:tty';
 import {
   Pty as RawPty,
@@ -49,14 +49,13 @@ export class Pty {
   #fdClosed: boolean = false;
 
   #socket: ReadStream;
-  #writable: Writable;
 
   get read(): Readable {
     return this.#socket;
   }
 
   get write(): Writable {
-    return this.#writable;
+    return this.#socket;
   }
 
   constructor(options: PtyOptions) {
@@ -84,9 +83,6 @@ export class Pty {
     this.#fd = this.#pty.takeFd();
 
     this.#socket = new ReadStream(this.#fd);
-    this.#writable = new Writable({
-      write: this.#socket.write.bind(this.#socket),
-    });
 
     // catch end events
     const handleClose = async () => {
@@ -95,7 +91,6 @@ export class Pty {
       }
 
       this.#fdClosed = true;
-      this.#writable.end();
 
       // must wait for fd close and exit result before calling real exit
       await readFinished;
@@ -142,7 +137,6 @@ export class Pty {
     // end instead of destroy so that the user can read the last bits of data
     // and allow graceful close event to mark the fd as ended
     this.#socket.end();
-    this.#writable.end();
   }
 
   resize(size: Size) {
