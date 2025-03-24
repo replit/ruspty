@@ -6,6 +6,8 @@
 
 const { existsSync, readFileSync } = require('fs')
 const { join } = require('path');
+const { createRequire } = require('node:module');
+require = createRequire(__filename);
 
 const { platform, arch } = process;
 
