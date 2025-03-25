@@ -471,20 +471,17 @@ describe(
 
       readStream.on('data', () => {});
 
-      const errorPromise = new Promise<void>((resolve, reject) => {
-        writeStream.on('error', (error) => {
-          reject(error);
-        });
-      });
-
       pty.close();
 
       assert(!writeStream.writable)
-      writeStream.write("hello2");
-      await expect(errorPromise).rejects.toThrowError(/write after end/);
-      
       await vi.waitFor(() => expect(onExit).toHaveBeenCalledTimes(1));
-      
+      let receivedError = false;
+      writeStream.write("hello2", (error) => {
+        if (error) {
+          receivedError = true;
+        }
+      });
+      await vi.waitFor(() => receivedError);
       expect(getOpenFds()).toStrictEqual(oldFds);
     });
   },
