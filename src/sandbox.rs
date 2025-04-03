@@ -1,0 +1,675 @@
+/// A minimalistic ptrace-based sandbox.
+///
+/// Modern (2025-era) sandboxes should use seccomp-bpf + user notification, but at Replit, there's already one such sandbox in use, so it cannot be used.
+/// Instead, an old (2000s-era) ptrace-based sandbox is used. It is not intended to be secure, just to prevent accidents.
+use std::fs::read_link;
+use std::panic::catch_unwind;
+use std::path::PathBuf;
+
+use anyhow::{Context, Result};
+use log::{debug, error};
+use nix::fcntl::OFlag;
+use nix::libc::c_int;
+use nix::sys::ptrace;
+use nix::sys::signal::{kill, raise, signal, Signal};
+use nix::sys::wait::{wait, WaitStatus};
+use nix::unistd::{fork, ForkResult, Pid};
+use nix::Error;
+use syscalls::x86_64::Sysno;
+
+const AT_FDCWD: u64 = 0xffffff9c;
+
+/// List of paths that are forbidden to modify.
+pub const FORBIDDEN_PATHS: &[&str] = &[
+  "/home/runner/workspace/.replit",
+  "/home/runner/workspace/replit.nix",
+  "/home/runner/workspace/.git/refs/replit/agent-ledger",
+];
+
+/// List of prefixes that are forbidden to delete.
+pub const FORBIDDEN_UNLINK_PREFIXES: &[&str] = &["/home/runner/workspace/.git/"];
+
+static mut CHILD_PID: Pid = Pid::from_raw(-1);
+
+/// Read a path (a NUL-terminated string) from the tracee.
+fn read_path(pid: Pid, mut addr: u64) -> Result<PathBuf> {
+  let mut buf = Vec::<u8>::with_capacity(1024);
+  let mut offset = (addr & 0x7) as usize;
+  addr -= offset as u64;
+  loop {
+    match ptrace::read(pid, addr as ptrace::AddressType) {
+      Ok(ret) => {
+        let bytes = ret.to_ne_bytes();
+        let (slice, last) = match bytes.as_slice()[offset..].iter().position(|x| *x == 0) {
+          Some(end) => (&bytes.as_slice()[offset..offset + end], true),
+          None => (&bytes.as_slice()[offset..], false),
+        };
+        buf.extend_from_slice(slice);
+        if last {
+          return Ok(PathBuf::from(
+            String::from_utf8(buf).context("decode string")?,
+          ));
+        }
+        offset = 0;
+        addr += 8;
+      }
+      Err(Error::ESRCH) => {
+        return Err(anyhow::Error::new(Error::ESRCH))
+          .with_context(|| format!("process exited: {pid}"));
+      }
+      Err(err) => {
+        return Err(anyhow::Error::new(err))
+          .with_context(|| format!("failed to read string: {pid} at 0x{addr:x}"));
+      }
+    }
+  }
+}
+
+/// Get the tracee's cwd.
+fn get_cwd(pid: Pid) -> Result<PathBuf> {
+  read_link(format!("/proc/{}/cwd", pid)).with_context(|| format!("get cwd: /proc/{pid}/cwd"))
+}
+
+/// Get the tracee's path for a file descriptor.
+fn get_fd_path(pid: Pid, fd: i32) -> Result<PathBuf> {
+  read_link(format!("/proc/{}/fd/{}", pid, fd))
+    .with_context(|| format!("get path: /proc/{pid}/fd/{fd}"))
+}
+
+/// Get the tracee's target path for the syscall that is about to be executed by the kernel.
+fn get_target_path(pid: Pid) -> Result<Option<(Sysno, PathBuf)>> {
+  let regs = ptrace::getregs(pid).unwrap();
+  if regs.rax != (-(Error::ENOSYS as i32)) as u64 {
+    // This is a syscall-exit-stop, and we have already made the decision of allowing / denying the operation.
+    return Ok(None);
+  }
+  match Sysno::new(regs.orig_rax as usize) {
+    Some(sysno @ Sysno::open) => {
+      let mut path = get_cwd(pid).context("open: get cwd")?;
+      path.push(read_path(pid, regs.rdi as u64).context("open: read path")?);
+      debug!(pid:? = pid, filename:?= path, sysno:?=sysno; "syscall");
+      let accmode = (regs.rsi & OFlag::O_ACCMODE.bits() as u64) as c_int;
+      if accmode != OFlag::O_WRONLY.bits() && accmode != OFlag::O_RDWR.bits() {
+        return Ok(None);
+      }
+      Ok(Some((sysno, path)))
+    }
+    Some(sysno @ Sysno::truncate) => {
+      let mut path = get_cwd(pid).context("truncate: get cwd")?;
+      path.push(read_path(pid, regs.rdi as u64).context("truncate: read path")?);
+      debug!(pid:? = pid, filename:?= path, sysno:?=sysno; "syscall");
+      Ok(Some((sysno, path)))
+    }
+    Some(sysno @ Sysno::rmdir) => {
+      let mut path = get_cwd(pid).context("rmdir: get cwd")?;
+      path.push(read_path(pid, regs.rdi as u64).context("rmdir: read path")?);
+      debug!(pid:? = pid, filename:?= path, sysno:?=sysno; "syscall");
+      Ok(Some((sysno, path)))
+    }
+    Some(sysno @ Sysno::rename) => {
+      let cwd = get_cwd(pid).context("rename: get cwd")?;
+      let oldname = cwd.join(read_path(pid, regs.rdi as u64).context("rename: read oldname")?);
+      let newname = cwd.join(read_path(pid, regs.rsi as u64).context("rename: read newname")?);
+      debug!(pid:? = pid, oldname:?= oldname, newname:? = newname, sysno:?=sysno; "syscall");
+      Ok(Some((sysno, newname)))
+    }
+    Some(sysno @ Sysno::creat) => {
+      let mut path = get_cwd(pid).context("creat: get cwd")?;
+      path.push(read_path(pid, regs.rdi as u64).context("creat: read path")?);
+      debug!(pid:? = pid, filename:?= path, sysno:?=sysno; "syscall");
+      Ok(Some((sysno, path)))
+    }
+    Some(sysno @ Sysno::link) => {
+      let cwd = get_cwd(pid).context("link: get cwd")?;
+      let oldname = cwd.join(read_path(pid, regs.rdi as u64).context("link: read oldname")?);
+      let newname = cwd.join(read_path(pid, regs.rsi as u64).context("link: read newname")?);
+      debug!(pid:? = pid, oldname:?= oldname, newname:? = newname, sysno:?=sysno; "syscall");
+      Ok(Some((sysno, newname)))
+    }
+    Some(sysno @ Sysno::unlink) => {
+      let mut path = get_cwd(pid).context("unlink: get cwd")?;
+      path.push(read_path(pid, regs.rdi as u64).context("unlink: read path")?);
+      debug!(pid:? = pid, filename:?= path, sysno:?=sysno; "syscall");
+      Ok(Some((sysno, path)))
+    }
+    Some(sysno @ Sysno::symlink) => {
+      let cwd = get_cwd(pid).context("symlink: get cwd")?;
+      let oldname = cwd.join(read_path(pid, regs.rdi as u64).context("symlink: read oldname")?);
+      let newname = cwd.join(read_path(pid, regs.rsi as u64).context("symlink: read newname")?);
+      debug!(pid:? = pid, oldname:?= oldname, newname:? = newname, sysno:?=sysno; "syscall");
+      Ok(Some((sysno, newname)))
+    }
+    Some(sysno @ Sysno::openat) => {
+      let mut path = match regs.rdi {
+        AT_FDCWD => get_cwd(pid).context("openat: get cwd")?,
+        dirfd => get_fd_path(pid, dirfd as i32)
+          .with_context(|| format!("openat: get fd path {:x}", regs.rdi))?,
+      };
+      path.push(read_path(pid, regs.rsi as u64)?);
+      debug!(pid:? = pid, filename:?= path, sysno:?=sysno; "syscall");
+      let accmode = (regs.rdx & OFlag::O_ACCMODE.bits() as u64) as c_int;
+      if accmode != OFlag::O_WRONLY.bits() && accmode != OFlag::O_RDWR.bits() {
+        return Ok(None);
+      }
+      Ok(Some((sysno, path)))
+    }
+    Some(sysno @ Sysno::unlinkat) => {
+      let mut path = match regs.rdi {
+        AT_FDCWD => get_cwd(pid).context("unlinkat: get cwd")?,
+        dirfd => get_fd_path(pid, dirfd as i32)
+          .with_context(|| format!("unlinkat: get fd path {:x}", regs.rdi))?,
+      };
+      path.push(read_path(pid, regs.rsi as u64)?);
+      debug!(pid:? = pid, filename:?= path, sysno:?=sysno; "syscall");
+      Ok(Some((sysno, path)))
+    }
+    Some(sysno @ Sysno::renameat) => {
+      let mut oldname = match regs.rdi {
+        AT_FDCWD => get_cwd(pid).context("renameat: get old cwd")?,
+        dirfd => get_fd_path(pid, dirfd as i32)
+          .with_context(|| format!("renameat: get old fd path {:x}", regs.rdi))?,
+      };
+      oldname.push(read_path(pid, regs.rsi as u64).context("renameat: get old path")?);
+      let mut newname = match regs.rdx {
+        AT_FDCWD => get_cwd(pid).context("renameat: get new cwd")?,
+        dirfd => get_fd_path(pid, dirfd as i32)
+          .with_context(|| format!("renameat: get new fd path {:x}", regs.rdi))?,
+      };
+      newname.push(read_path(pid, regs.r10 as u64).context("renameat: get old path")?);
+      debug!(pid:? = pid, oldname:?= oldname, newname:? = newname, sysno:?=sysno; "syscall");
+      Ok(Some((sysno, newname)))
+    }
+    Some(sysno @ Sysno::linkat) => {
+      let mut oldpath = match regs.rdi {
+        AT_FDCWD => get_cwd(pid).context("linkat: get old cwd")?,
+        dirfd => get_fd_path(pid, dirfd as i32)
+          .with_context(|| format!("linkat: get old fd path {:x}", regs.rdi))?,
+      };
+      oldpath.push(read_path(pid, regs.rsi as u64).context("linkat: get old path")?);
+      let mut newpath = match regs.rdx {
+        AT_FDCWD => get_cwd(pid).context("linkat: get new cwd")?,
+        dirfd => get_fd_path(pid, dirfd as i32)
+          .with_context(|| format!("linkat: get new fd path {:x}", regs.rdi))?,
+      };
+      newpath.push(read_path(pid, regs.rsi as u64).context("linkat: get new path")?);
+      debug!(pid:? = pid, oldpath:?= oldpath, newpath:? = newpath, sysno:?=sysno; "syscall");
+      Ok(Some((sysno, newpath)))
+    }
+    Some(sysno @ Sysno::symlinkat) => {
+      let mut oldpath = match regs.rdi {
+        AT_FDCWD => get_cwd(pid).context("symlinkat: get old cwd")?,
+        dirfd => get_fd_path(pid, dirfd as i32)
+          .with_context(|| format!("symlinkat: get old fd path {:x}", regs.rdi))?,
+      };
+      oldpath.push(read_path(pid, regs.rsi as u64).context("symlinkat: get old path")?);
+      let mut newpath = match regs.rdx {
+        AT_FDCWD => get_cwd(pid).context("symlinkat: get new cwd")?,
+        dirfd => get_fd_path(pid, dirfd as i32)
+          .with_context(|| format!("symlinkat: get new fd path {:x}", regs.rdi))?,
+      };
+      newpath.push(read_path(pid, regs.r10 as u64).context("symlinkat: get new path")?);
+      debug!(pid:? = pid, oldpath:?= oldpath, newpath:? = newpath, sysno:?=sysno; "syscall");
+      Ok(Some((sysno, newpath)))
+    }
+    Some(sysno @ Sysno::renameat2) => {
+      let mut oldpath = match regs.rdi {
+        AT_FDCWD => get_cwd(pid).context("renameat2: get old cwd")?,
+        dirfd => get_fd_path(pid, dirfd as i32)
+          .with_context(|| format!("renameat2: get old fd path {:x}", regs.rdi))?,
+      };
+      oldpath.push(read_path(pid, regs.rsi as u64).context("renameat2: get old path")?);
+      let mut newpath = match regs.rdx {
+        AT_FDCWD => get_cwd(pid).context("renameat2: get new cwd")?,
+        dirfd => get_fd_path(pid, dirfd as i32)
+          .with_context(|| format!("renameat2: get new fd path {:x}", regs.rdi))?,
+      };
+      newpath.push(read_path(pid, regs.r10 as u64).context("renameat2: get new path")?);
+      debug!(pid:? = pid, oldpath:?= oldpath, newpath:? = newpath, sysno:?=sysno; "syscall");
+      Ok(Some((sysno, newpath)))
+    }
+    Some(sysno @ Sysno::openat2) => {
+      let mut path = match regs.rdi {
+        AT_FDCWD => get_cwd(pid).context("openat2: get cwd")?,
+        dirfd => get_fd_path(pid, dirfd as i32)
+          .with_context(|| format!("openat2: get fd path {:x}", regs.rdi))?,
+      };
+      path.push(read_path(pid, regs.rsi as u64)?);
+      let accmode = (regs.rdx & OFlag::O_ACCMODE.bits() as u64) as c_int;
+      if accmode != OFlag::O_WRONLY.bits() && accmode != OFlag::O_RDWR.bits() {
+        return Ok(None);
+      }
+      debug!(pid:? = pid, filename:?= path, sysno:?=sysno; "syscall");
+      Ok(Some((sysno, path)))
+    }
+    Some(sysno) => {
+      debug!(pid:? = pid, sysno:?=sysno.name(); "syscall");
+
+      Ok(None)
+    }
+    None => {
+      // We don't know what this is.
+      Ok(None)
+    }
+  }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct SandboxError {
+  sysno: Sysno,
+  path: PathBuf,
+}
+
+impl std::fmt::Display for SandboxError {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    if self.sysno == Sysno::unlink || self.sysno == Sysno::unlinkat {
+      write!(
+        f,
+        "Tried to delete a forbidden path: {}",
+        self.path.display()
+      )
+    } else {
+      write!(
+        f,
+        "Tried to modify a forbidden path: {}",
+        self.path.display()
+      )
+    }
+  }
+}
+
+impl std::error::Error for SandboxError {
+  fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+    None
+  }
+}
+
+/// Inspect the tracee's syscall that is about to be executed.
+fn handle_syscall(
+  pid: Pid,
+  forbidden_paths: &Vec<String>,
+  forbidden_unlink_prefixes: &Vec<String>,
+) -> Result<()> {
+  if let Some((sysno, path)) = get_target_path(pid).context("get_taget_path")? {
+    for forbidden_path in forbidden_paths {
+      if Some(forbidden_path.as_str()) == path.as_path().to_str() {
+        return Err(SandboxError { sysno, path }.into());
+      }
+    }
+    if sysno == Sysno::unlink || sysno == Sysno::unlinkat {
+      for forbidden_unlink_prefix in forbidden_unlink_prefixes {
+        if let Some(path_str) = path.as_path().to_str() {
+          if path_str.starts_with(forbidden_unlink_prefix) {
+            return Err(SandboxError { sysno, path }.into());
+          }
+        }
+      }
+    }
+  }
+
+  Ok(())
+}
+
+extern "C" fn forward_signal(signum: c_int) {
+  debug!(signum; "received signal");
+  if let Ok(signal) = Signal::try_from(signum) {
+    let err = unsafe { kill(CHILD_PID, signal) };
+    debug!(signum, err:? = err, pid:? = unsafe { CHILD_PID }; "sent signal");
+  }
+}
+
+/// Run the tracee under the sandbox.
+fn run_parent(
+  main_pid: Pid,
+  forbidden_paths: &Vec<String>,
+  forbidden_unlink_prefixes: &Vec<String>,
+) -> Result<i32> {
+  unsafe {
+    CHILD_PID = main_pid;
+    // Forward all signals to the child process.
+    for signum in Signal::iterator() {
+      if signum == Signal::SIGKILL || signum == Signal::SIGCHLD || signum == Signal::SIGSTOP {
+        continue;
+      }
+      match signal(
+        signum,
+        nix::sys::signal::SigHandler::Handler(forward_signal),
+      ) {
+        Ok(_) => {}
+        Err(err) => {
+          return Err(err).with_context(|| {
+            format!(
+              "failed to install signal handler for {:?}: {:?}",
+              signum, err
+            )
+          });
+        }
+      }
+    }
+  }
+
+  // The child process will send a SIGCHLD.
+  wait().with_context(|| format!("wait {main_pid}"))?;
+  match ptrace::setoptions(
+    main_pid,
+    ptrace::Options::PTRACE_O_TRACESYSGOOD
+      | ptrace::Options::PTRACE_O_TRACEFORK
+      | ptrace::Options::PTRACE_O_TRACEVFORK
+      | ptrace::Options::PTRACE_O_TRACECLONE
+      | ptrace::Options::PTRACE_O_EXITKILL
+      | ptrace::Options::PTRACE_O_TRACEEXIT,
+  ) {
+    Ok(_) => {}
+    Err(Error::ESRCH) => {
+      // The child process has already exited.
+      return Ok(5);
+    }
+    Err(err) => {
+      return Err(err).context("ptrace::setoptions");
+    }
+  }
+  ptrace::syscall(main_pid, None).context("Failed continue process")?;
+
+  loop {
+    match wait() {
+      Ok(WaitStatus::Stopped(pid, sig_num)) => match sig_num {
+        signum @ Signal::SIGTRAP => {
+          debug!(signal:?=signum, pid:? = pid; "signal");
+          match handle_syscall(pid, forbidden_paths, forbidden_unlink_prefixes)
+            .with_context(|| format!("handle_sigtrap pid={pid}"))
+          {
+            Ok(()) => match ptrace::syscall(pid, None) {
+              Ok(_) => {}
+              Err(Error::ESRCH) => {}
+              Err(err) => {
+                return Err(anyhow::Error::new(err).context("failed to continue process"));
+              }
+            },
+            Err(err) => {
+              match ptrace::kill(pid) {
+                Ok(_) => {}
+                Err(Error::ESRCH) => {}
+                Err(err) => {
+                  error!(pid:? = pid, error:?=err; "failed to kill process");
+                }
+              }
+              return Err(err);
+            }
+          }
+        }
+        signum @ Signal::SIGSTOP => {
+          debug!(signal:?=signum, pid:? = pid; "signal");
+          ptrace::setoptions(
+            pid,
+            ptrace::Options::PTRACE_O_TRACESYSGOOD
+              | ptrace::Options::PTRACE_O_TRACEFORK
+              | ptrace::Options::PTRACE_O_TRACEVFORK
+              | ptrace::Options::PTRACE_O_TRACECLONE
+              | ptrace::Options::PTRACE_O_EXITKILL
+              | ptrace::Options::PTRACE_O_TRACEEXIT,
+          )
+          .context("setoptions")?;
+          match ptrace::syscall(pid, None) {
+            Ok(_) => {}
+            Err(Error::ESRCH) => {}
+            Err(err) => {
+              return Err(anyhow::Error::new(err).context("failed to continue process"));
+            }
+          }
+        }
+        signum => {
+          debug!(signal:?=signum, pid:? = pid; "signal");
+          match ptrace::syscall(pid, Some(signum)) {
+            Ok(_) => {}
+            Err(Error::ESRCH) => {}
+            Err(err) => {
+              return Err(anyhow::Error::new(err).context("failed to continue process"));
+            }
+          }
+        }
+      },
+
+      Ok(WaitStatus::PtraceSyscall(pid)) => {
+        match handle_syscall(pid, forbidden_paths, forbidden_unlink_prefixes)
+          .with_context(|| format!("handle_syscall pid={pid}"))
+        {
+          Ok(()) => match ptrace::syscall(pid, None) {
+            Ok(_) => {}
+            Err(Error::ESRCH) => {}
+            Err(err) => {
+              return Err(anyhow::Error::new(err).context("failed to continue process"));
+            }
+          },
+          Err(err) => {
+            match ptrace::kill(pid) {
+              Ok(_) => {}
+              Err(Error::ESRCH) => {}
+              Err(err) => {
+                error!(pid:? = pid, error:?=err; "failed to kill process");
+              }
+            }
+            return Err(err);
+          }
+        }
+      }
+
+      Ok(WaitStatus::PtraceEvent(pid, _sig_num, _data)) => match ptrace::syscall(pid, None) {
+        Ok(_) => {}
+        Err(Error::ESRCH) => {}
+        Err(err) => {
+          return Err(anyhow::Error::new(err).context("failed to continue process"));
+        }
+      },
+
+      Ok(WaitStatus::Exited(pid, exit_status)) => {
+        debug!(pid:? = pid, exit_status:? = exit_status; "exited");
+        if pid == main_pid {
+          return Ok(exit_status);
+        }
+      }
+
+      Ok(WaitStatus::Signaled(pid, sig_num, _core_dump)) => {
+        debug!(pid:? = pid, signal:? = sig_num; "signaled");
+        if pid == main_pid {
+          return Ok(128 + sig_num as i32);
+        }
+        match ptrace::syscall(pid, Some(sig_num)) {
+          Ok(_) => {}
+          Err(Error::ESRCH) => {}
+          Err(err) => {
+            return Err(anyhow::Error::new(err).context("failed to continue process"));
+          }
+        }
+      }
+
+      Ok(status) => {
+        debug!(pid:? = main_pid, status:? = status; "wait");
+        match ptrace::syscall(main_pid, None) {
+          Ok(_) => {}
+          Err(Error::ESRCH) => {}
+          Err(err) => {
+            return Err(anyhow::Error::new(err).context("failed to continue process"));
+          }
+        }
+      }
+
+      Err(Error::ECHILD) => {
+        // No more children! We're done.
+        break;
+      }
+
+      Err(err) => {
+        error!("Some kind of error - {:?}", err);
+        break;
+      }
+    }
+  }
+
+  Ok(0)
+}
+
+/// Options for the sandbox.
+pub struct SandboxOptions {
+  pub forbidden_paths: Vec<String>,
+  pub forbidden_unlink_prefixes: Vec<String>,
+}
+
+/// Install a sandbox in "the current process".
+///
+/// In reality this forks the process and the child process is the one that is run under the sandbox.
+/// The parent process is not accessible and is the one that actually runs the sandbox.
+/// This is intended to be used as a "pre-execve" hook.
+///
+/// Modifying the forbidden paths / unlinking the forbidden prefixes will result in the sandboxed process being killed.
+pub fn install_sandbox(options: SandboxOptions) -> Result<()> {
+  match unsafe { fork() }.context("fork")? {
+    ForkResult::Child => {
+      ptrace::traceme().context("ptrace::traceme")?;
+      raise(Signal::SIGSTOP).context("raise SIGSTOP")?;
+
+      Ok(())
+    }
+
+    ForkResult::Parent { child } => {
+      let err = catch_unwind(|| {
+        let status_code = match run_parent(
+          child,
+          &options.forbidden_paths,
+          &options.forbidden_unlink_prefixes,
+        )
+        .context("run_parent")
+        {
+          Ok(result) => result,
+          Err(err) => match err.downcast_ref::<SandboxError>() {
+            Some(err) => {
+              eprintln!("{}", err);
+              254
+            }
+            None => {
+              eprintln!("run process: {:?}", err);
+              1
+            }
+          },
+        };
+
+        std::process::exit(status_code);
+      });
+      if err.is_ok() {
+        std::process::exit(0);
+      } else {
+        eprintln!("{:#?}", err);
+        std::process::exit(253);
+      }
+    }
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  use std::fs::{read, File};
+  use std::os::fd::AsRawFd;
+  use std::os::unix::process::CommandExt;
+  use std::path::Path;
+  use std::process::Command;
+
+  use nix::sys::wait::waitpid;
+  use nix::unistd::dup2;
+  use tempfile::TempDir;
+
+  fn test_install_sandbox(f: fn() -> !, tempdir: &Path) -> Result<(i32, String, String)> {
+    let stdout_path = tempdir.join("stdout.txt");
+    let stdout_file = File::create(&stdout_path).context("create stdout")?;
+    let stderr_path = tempdir.join("stderr.txt");
+    let stderr_file = File::create(&stderr_path).context("create stderr")?;
+
+    // We do a double-fork so that the tracer exists in its own little process. That lets the PTRACE_O_EXITKILL magic kick in.
+    match unsafe { fork() }.context("fork")? {
+      ForkResult::Child => {
+        let err = catch_unwind(|| {
+          if let Err(err) = dup2(stdout_file.as_raw_fd(), 1) {
+            eprintln!("failed to redirect stdout: {err}");
+            std::process::exit(2);
+          }
+          drop(stdout_file);
+          if let Err(err) = dup2(stderr_file.as_raw_fd(), 2) {
+            eprintln!("failed to redirect stderr: {err}");
+            std::process::exit(3);
+          }
+          drop(stderr_file);
+
+          if let Err(err) = install_sandbox(SandboxOptions {
+            forbidden_paths: FORBIDDEN_PATHS.iter().map(|&s| s.into()).collect(),
+            forbidden_unlink_prefixes: FORBIDDEN_UNLINK_PREFIXES
+              .iter()
+              .map(|&s| s.into())
+              .collect(),
+          }) {
+            eprintln!("failed to fork sandbox: {err}");
+            std::process::exit(4);
+          }
+          f();
+        });
+        if err.is_ok() {
+          std::process::exit(0);
+        } else {
+          eprintln!("{:#?}", err);
+          std::process::exit(253);
+        }
+      }
+      ForkResult::Parent { child } => {
+        drop(stdout_file);
+        drop(stderr_file);
+        let wait_status = match waitpid(child, None) {
+          Ok(WaitStatus::Exited(_pid, exit_status)) => exit_status,
+          Ok(wait_status) => {
+            panic!("unexpected wait status: {:#?}", wait_status);
+          }
+          Err(err) => {
+            panic!("unexpected wait error: {:#?}", err);
+          }
+        };
+        let stdout = String::from_utf8(
+          read(&stdout_path).with_context(|| format!("read {:#?}", stdout_path))?,
+        )
+        .context("decode stdout")?;
+        let stderr = String::from_utf8(
+          read(&stderr_path).with_context(|| format!("read {:#?}", stderr_path))?,
+        )
+        .context("decode stderr")?;
+        Ok((wait_status, stdout, stderr))
+      }
+    }
+  }
+
+  #[test]
+  fn it_lets_safe_commands_proceed() {
+    fn exec_hook() -> ! {
+      let err = Command::new("bash").args(["-c", "echo hello"]).exec();
+      eprintln!("failed to exec: {err:#?}");
+      std::process::exit(1);
+    }
+
+    let tmp_dir =
+      TempDir::with_prefix("pid2sandbox-").expect("Failed to create temporary directory");
+    assert_eq!(
+      test_install_sandbox(exec_hook, tmp_dir.path()).expect("test_install_sandbox"),
+      (0, "hello\n".to_string(), "".to_string())
+    );
+  }
+
+  #[test]
+  fn it_prevents_modifying_dot_replit() {
+    fn exec_hook() -> ! {
+      std::fs::write("/home/runner/workspace/.replit", "yo").expect("write .replit");
+      std::process::exit(0);
+    }
+
+    let tmp_dir =
+      TempDir::with_prefix("pid2sandbox-").expect("Failed to create temporary directory");
+    // Cargo captures the error message, but we only care about the exit code.
+    let (exit_status, _, _) =
+      test_install_sandbox(exec_hook, tmp_dir.path()).expect("test_install_sandbox");
+    assert_eq!(exit_status, 254);
+  }
+}

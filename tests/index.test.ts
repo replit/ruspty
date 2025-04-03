@@ -1,6 +1,9 @@
 import { Pty, getCloseOnExec, setCloseOnExec } from '../wrapper';
 import { type Writable } from 'stream';
 import { readdirSync, readlinkSync } from 'fs';
+import { mkdir, rmdir, mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, test, expect, beforeEach, afterEach, vi, type Mock, assert } from 'vitest';
 import { exec as execAsync } from 'child_process';
 import { promisify } from 'util';
@@ -535,6 +538,73 @@ describe('cgroup opts', () => {
         onExit: vi.fn(),
       });
     }).toThrowError();
+  });
+});
+
+describe('sandbox opts', () => {
+  let tempDirPath = '/inexistent/path/before';
+
+  beforeEach(async () => {
+    if (IS_DARWIN) {
+      return;
+    }
+    tempDirPath = await mkdtemp(join(tmpdir(), 'ruspty-'));
+  });
+
+  afterEach(async () => {
+    if (IS_DARWIN) {
+      return;
+    }
+    await rmdir(tempDirPath, { recursive: true });
+    tempDirPath = '/inexistent/path/after';
+  });
+
+  testSkipOnDarwin('basic sandbox', async () => {
+    const oldFds = getOpenFds();
+    let buffer = '';
+    const onExit = vi.fn();
+
+    const pty = new Pty({
+      command: '/bin/sh',
+      args: ['-c', 'echo hello'],
+      sandbox: { enabled: true },
+      onExit,
+    });
+
+    const readStream = pty.read;
+    readStream.on('data', (data) => {
+      buffer = data.toString();
+    });
+
+    await vi.waitFor(() => expect(onExit).toHaveBeenCalledTimes(1));
+    expect(onExit).toHaveBeenCalledWith(null, 0);
+    expect(buffer).toContain('hello');
+    expect(getOpenFds()).toStrictEqual(oldFds);
+  });
+
+  testSkipOnDarwin('basic protection against git-yeetage', async () => {
+    const oldFds = getOpenFds();
+    let buffer = '';
+    const onExit = vi.fn();
+
+    const gitPath = `${tempDirPath}/.git`;
+    await mkdir(gitPath);
+    const pty = new Pty({
+      command: '/bin/sh',
+      args: ['-c', `sh -c "rm -rf ${gitPath}"`],
+      sandbox: { enabled: true, forbiddenUnlinkPrefixes: [gitPath] },
+      onExit,
+    });
+
+    const readStream = pty.read;
+    readStream.on('data', (data) => {
+      buffer = data.toString();
+    });
+
+    await vi.waitFor(() => expect(onExit).toHaveBeenCalledTimes(1));
+    expect(onExit).toHaveBeenCalledWith(null, 254);
+    expect(buffer).toContain(`Tried to delete a forbidden path: ${gitPath}`);
+    expect(getOpenFds()).toStrictEqual(oldFds);
   });
 });
 
