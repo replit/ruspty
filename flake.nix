@@ -1,8 +1,8 @@
 {
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-24.11";
 
-  outputs = { self, nixpkgs }: 
-  let 
+  outputs = { self, nixpkgs }:
+  let
     mkDevShell = system:
     let
       pkgs = nixpkgs.legacyPackages.${system};
@@ -12,6 +12,7 @@
         nodejs_20
         bun
         cargo
+        clippy
         libiconv
         rustc
         rustfmt

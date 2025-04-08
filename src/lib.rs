@@ -24,12 +24,24 @@ use nix::sys::termios::{self, SetArg};
 #[macro_use]
 extern crate napi_derive;
 
+#[cfg(target_os = "linux")]
+mod sandbox;
+
 #[napi]
 #[allow(dead_code)]
 struct Pty {
   controller_fd: Option<OwnedFd>,
   /// The pid of the forked process.
   pub pid: u32,
+}
+
+/// The options passed to the sandbox.
+#[napi(object)]
+struct SandboxOptions {
+  pub forbidden_paths: Vec<String>,
+  pub forbidden_path_message: String,
+  pub forbidden_unlink_prefixes: Vec<String>,
+  pub forbidden_unlink_message: String,
 }
 
 /// The options that can be passed to the constructor of Pty.
@@ -42,6 +54,7 @@ struct PtyOptions {
   pub size: Option<Size>,
   pub cgroup_path: Option<String>,
   pub interactive: Option<bool>,
+  pub sandbox: Option<SandboxOptions>,
   #[napi(ts_type = "(err: null | Error, exitCode: number) => void")]
   pub on_exit: JsFunction,
 }
@@ -123,6 +136,14 @@ impl Pty {
       ));
     }
 
+    #[cfg(not(target_os = "linux"))]
+    if opts.sandbox.is_some() {
+      return Err(napi::Error::new(
+        napi::Status::GenericFailure,
+        "sandbox is only supported on Linux",
+      ));
+    }
+
     let size = opts.size.unwrap_or(Size { cols: 80, rows: 24 });
     let window_size = Winsize {
       ws_col: size.cols,
@@ -187,7 +208,9 @@ impl Pty {
           cgroup_file.write_all(format!("{}", pid).as_bytes())?;
         }
 
-        // become the controlling tty for the program
+        // become the controlling tty for the program.
+        //nNote that TIOCSCTTY is not the same size in all platforms.
+        #[allow(clippy::useless_conversion)]
         let err = libc::ioctl(raw_user_fd, TIOCSCTTY.into(), 0);
         if err == -1 {
           return Err(Error::new(ErrorKind::Other, "ioctl-TIOCSCTTY"));
@@ -212,6 +235,22 @@ impl Pty {
         if let Ok(mut termios) = termios::tcgetattr(&user_fd) {
           termios.input_flags |= termios::InputFlags::IUTF8;
           termios::tcsetattr(&user_fd, SetArg::TCSANOW, &termios)?;
+        }
+
+        // set the sandbox if specified
+        #[cfg(target_os = "linux")]
+        if let Some(sandbox_opts) = &opts.sandbox {
+          if let Err(err) = sandbox::install_sandbox(sandbox::SandboxOptions {
+            forbidden_paths: sandbox_opts.forbidden_paths.clone(),
+            forbidden_path_message: sandbox_opts.forbidden_path_message.clone(),
+            forbidden_unlink_prefixes: sandbox_opts.forbidden_unlink_prefixes.clone(),
+            forbidden_unlink_message: sandbox_opts.forbidden_unlink_message.clone(),
+          }) {
+            return Err(Error::new(
+              ErrorKind::Other,
+              format!("install_sandbox: {:#?}", err),
+            ));
+          }
         }
 
         // reset signal handlers

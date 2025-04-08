@@ -1,6 +1,6 @@
 {
   "name": "@replit/ruspty",
-  "version": "3.4.4",
+  "version": "3.4.5",
   "main": "dist/wrapper.js",
   "types": "dist/wrapper.d.ts",
   "author": "Szymon Kaliski <hi@szymonkaliski.com>",
@@ -40,10 +40,16 @@
     "build:wrapper": "tsup",
     "prepublishOnly": "napi prepublish -t npm",
     "test": "vitest run",
+    "test:ci": "vitest --reporter=verbose --reporter=github-actions run",
     "test:hang": "vitest run --reporter=hanging-process",
     "universal": "napi universal",
     "version": "napi version",
     "release": "npm publish --access public",
-    "format": "npx prettier *.{js,ts} --write"
+    "format": "npx prettier *.{js,ts} tests/*.ts --write"
+  },
+  "optionalDependencies": {
+    "@replit/ruspty-darwin-x64": "3.4.5",
+    "@replit/ruspty-darwin-arm64": "3.4.5",
+    "@replit/ruspty-linux-x64-gnu": "3.4.5"
   }
 }
