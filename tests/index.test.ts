@@ -574,10 +574,18 @@ describe('sandbox opts', { repeats: 10 }, () => {
       command: '/bin/sh',
       args: ['-c', 'echo hello'],
       sandbox: {
-        forbiddenPaths: [tempDirPath],
-        forbiddenPathMessage: 'Tried to modify a forbidden path',
-        forbiddenUnlinkPrefixes: [tempDirPath],
-        forbiddenUnlinkMessage: 'Tried to delete a forbidden path',
+        rules: [
+          {
+            operation: 'Modify',
+            prefixes: [tempDirPath],
+            message: 'Tried to modify a forbidden path',
+          },
+          {
+            operation: 'Delete',
+            prefixes: [tempDirPath],
+            message: 'Tried to delete a forbidden path',
+          },
+        ],
       },
       onExit,
     });
@@ -604,10 +612,13 @@ describe('sandbox opts', { repeats: 10 }, () => {
       command: '/bin/sh',
       args: ['-c', `/bin/sh -c "rm -rf ${gitPath}"`],
       sandbox: {
-        forbiddenPaths: [],
-        forbiddenPathMessage: 'Tried to modify a forbidden path',
-        forbiddenUnlinkPrefixes: [gitPath],
-        forbiddenUnlinkMessage: 'Tried to delete a forbidden path',
+        rules: [
+          {
+            operation: 'Delete',
+            prefixes: [gitPath],
+            message: 'Tried to delete a forbidden path',
+          },
+        ],
       },
       envs: {
         PATH: process.env.PATH,

@@ -35,13 +35,28 @@ struct Pty {
   pub pid: u32,
 }
 
-/// The options passed to the sandbox.
+#[napi(string_enum)]
+pub enum Operation {
+  Modify,
+  Delete,
+}
+
+/// Sandboxing rules. Deleting / modifying a path with any of the prefixes is forbidden and will
+/// cause process termination.
 #[napi(object)]
-struct SandboxOptions {
-  pub forbidden_paths: Vec<String>,
-  pub forbidden_path_message: String,
-  pub forbidden_unlink_prefixes: Vec<String>,
-  pub forbidden_unlink_message: String,
+pub struct SandboxRule {
+  /// The forbidden operation.
+  pub operation: Operation,
+  /// The list of prefixes that are matched by this rule.
+  pub prefixes: Vec<String>,
+  /// The message to be shown if this rule triggers.
+  pub message: String,
+}
+
+/// Options for the sandbox.
+#[napi(object)]
+pub struct SandboxOptions {
+  pub rules: Vec<SandboxRule>,
 }
 
 /// The options that can be passed to the constructor of Pty.
@@ -240,11 +255,19 @@ impl Pty {
         // set the sandbox if specified
         #[cfg(target_os = "linux")]
         if let Some(sandbox_opts) = &opts.sandbox {
-          if let Err(err) = sandbox::install_sandbox(sandbox::SandboxOptions {
-            forbidden_paths: sandbox_opts.forbidden_paths.clone(),
-            forbidden_path_message: sandbox_opts.forbidden_path_message.clone(),
-            forbidden_unlink_prefixes: sandbox_opts.forbidden_unlink_prefixes.clone(),
-            forbidden_unlink_message: sandbox_opts.forbidden_unlink_message.clone(),
+          if let Err(err) = sandbox::install_sandbox(sandbox::Options {
+            rules: sandbox_opts
+              .rules
+              .iter()
+              .map(|rule| sandbox::Rule {
+                operation: match rule.operation {
+                  Operation::Modify => sandbox::Operation::Modify,
+                  Operation::Delete => sandbox::Operation::Delete,
+                },
+                prefixes: rule.prefixes.clone(),
+                message: rule.message.clone(),
+              })
+              .collect(),
           }) {
             return Err(Error::new(
               ErrorKind::Other,
