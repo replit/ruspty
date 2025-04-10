@@ -23,6 +23,7 @@ use nix::Error;
 use syscalls::x86_64::Sysno;
 
 const AT_FDCWD: u64 = 0xffffff9c;
+const AT_FDCWD64: u64 = 0xffffffffffffff9c;
 
 static mut CHILD_PID: Pid = Pid::from_raw(-1);
 
@@ -75,12 +76,18 @@ fn get_fd_path(pid: Pid, fd: i32) -> Result<PathBuf> {
     .with_context(|| format!("get path: /proc/{pid}/fd/{fd}"))
 }
 
+struct SyscallTarget {
+  operation: Operation,
+  sysno: Sysno,
+  path: PathBuf,
+}
+
 /// Get the tracee's target path for the syscall that is about to be executed by the kernel.
-fn get_target_path(pid: Pid) -> Result<Option<(Sysno, PathBuf)>> {
+fn get_syscall_targets(pid: Pid) -> Result<Vec<SyscallTarget>> {
   let regs = ptrace::getregs(pid).unwrap();
   if regs.rax != (-(Error::ENOSYS as i32)) as u64 {
     // This is a syscall-exit-stop, and we have already made the decision of allowing / denying the operation.
-    return Ok(None);
+    return Ok(vec![]);
   }
   match Sysno::new(regs.orig_rax as usize) {
     Some(sysno @ Sysno::open) => {
@@ -89,58 +96,97 @@ fn get_target_path(pid: Pid) -> Result<Option<(Sysno, PathBuf)>> {
       debug!(pid:? = pid, filename:?= path, sysno:?=sysno; "syscall");
       let accmode = (regs.rsi & OFlag::O_ACCMODE.bits() as u64) as c_int;
       if accmode != OFlag::O_WRONLY.bits() && accmode != OFlag::O_RDWR.bits() {
-        return Ok(None);
+        return Ok(vec![]);
       }
-      Ok(Some((sysno, path)))
+      Ok(vec![SyscallTarget {
+        operation: Operation::Modify,
+        sysno,
+        path,
+      }])
     }
     Some(sysno @ Sysno::truncate) => {
       let mut path = get_cwd(pid).context("truncate: get cwd")?;
       path.push(read_path(pid, regs.rdi as u64).context("truncate: read path")?);
       debug!(pid:? = pid, filename:?= path, sysno:?=sysno; "syscall");
-      Ok(Some((sysno, path)))
+      Ok(vec![SyscallTarget {
+        operation: Operation::Modify,
+        sysno,
+        path,
+      }])
     }
     Some(sysno @ Sysno::rmdir) => {
       let mut path = get_cwd(pid).context("rmdir: get cwd")?;
       path.push(read_path(pid, regs.rdi as u64).context("rmdir: read path")?);
       debug!(pid:? = pid, filename:?= path, sysno:?=sysno; "syscall");
-      Ok(Some((sysno, path)))
+      Ok(vec![SyscallTarget {
+        operation: Operation::Delete,
+        sysno,
+        path,
+      }])
     }
     Some(sysno @ Sysno::rename) => {
       let cwd = get_cwd(pid).context("rename: get cwd")?;
       let oldname = cwd.join(read_path(pid, regs.rdi as u64).context("rename: read oldname")?);
       let newname = cwd.join(read_path(pid, regs.rsi as u64).context("rename: read newname")?);
       debug!(pid:? = pid, oldname:?= oldname, newname:? = newname, sysno:?=sysno; "syscall");
-      Ok(Some((sysno, newname)))
+      Ok(vec![
+        SyscallTarget {
+          operation: Operation::Delete,
+          sysno,
+          path: oldname,
+        },
+        SyscallTarget {
+          operation: Operation::Modify,
+          sysno,
+          path: newname,
+        },
+      ])
     }
     Some(sysno @ Sysno::creat) => {
       let mut path = get_cwd(pid).context("creat: get cwd")?;
       path.push(read_path(pid, regs.rdi as u64).context("creat: read path")?);
       debug!(pid:? = pid, filename:?= path, sysno:?=sysno; "syscall");
-      Ok(Some((sysno, path)))
+      Ok(vec![SyscallTarget {
+        operation: Operation::Modify,
+        sysno,
+        path,
+      }])
     }
     Some(sysno @ Sysno::link) => {
       let cwd = get_cwd(pid).context("link: get cwd")?;
       let oldname = cwd.join(read_path(pid, regs.rdi as u64).context("link: read oldname")?);
       let newname = cwd.join(read_path(pid, regs.rsi as u64).context("link: read newname")?);
       debug!(pid:? = pid, oldname:?= oldname, newname:? = newname, sysno:?=sysno; "syscall");
-      Ok(Some((sysno, newname)))
+      Ok(vec![SyscallTarget {
+        operation: Operation::Modify,
+        sysno,
+        path: newname,
+      }])
     }
     Some(sysno @ Sysno::unlink) => {
       let mut path = get_cwd(pid).context("unlink: get cwd")?;
       path.push(read_path(pid, regs.rdi as u64).context("unlink: read path")?);
       debug!(pid:? = pid, filename:?= path, sysno:?=sysno; "syscall");
-      Ok(Some((sysno, path)))
+      Ok(vec![SyscallTarget {
+        operation: Operation::Delete,
+        sysno,
+        path,
+      }])
     }
     Some(sysno @ Sysno::symlink) => {
       let cwd = get_cwd(pid).context("symlink: get cwd")?;
       let oldname = cwd.join(read_path(pid, regs.rdi as u64).context("symlink: read oldname")?);
       let newname = cwd.join(read_path(pid, regs.rsi as u64).context("symlink: read newname")?);
       debug!(pid:? = pid, oldname:?= oldname, newname:? = newname, sysno:?=sysno; "syscall");
-      Ok(Some((sysno, newname)))
+      Ok(vec![SyscallTarget {
+        operation: Operation::Modify,
+        sysno,
+        path: newname,
+      }])
     }
     Some(sysno @ Sysno::openat) => {
       let mut path = match regs.rdi {
-        AT_FDCWD => get_cwd(pid).context("openat: get cwd")?,
+        AT_FDCWD64 | AT_FDCWD => get_cwd(pid).context("openat: get cwd")?,
         dirfd => get_fd_path(pid, dirfd as i32)
           .with_context(|| format!("openat: get fd path {:x}", regs.rdi))?,
       };
@@ -148,106 +194,148 @@ fn get_target_path(pid: Pid) -> Result<Option<(Sysno, PathBuf)>> {
       debug!(pid:? = pid, filename:?= path, sysno:?=sysno; "syscall");
       let accmode = (regs.rdx & OFlag::O_ACCMODE.bits() as u64) as c_int;
       if accmode != OFlag::O_WRONLY.bits() && accmode != OFlag::O_RDWR.bits() {
-        return Ok(None);
+        return Ok(vec![]);
       }
-      Ok(Some((sysno, path)))
+      Ok(vec![SyscallTarget {
+        operation: Operation::Modify,
+        sysno,
+        path,
+      }])
     }
     Some(sysno @ Sysno::unlinkat) => {
       let mut path = match regs.rdi {
-        AT_FDCWD => get_cwd(pid).context("unlinkat: get cwd")?,
+        AT_FDCWD64 | AT_FDCWD => get_cwd(pid).context("unlinkat: get cwd")?,
         dirfd => get_fd_path(pid, dirfd as i32)
           .with_context(|| format!("unlinkat: get fd path {:x}", regs.rdi))?,
       };
       path.push(read_path(pid, regs.rsi as u64)?);
       debug!(pid:? = pid, filename:?= path, sysno:?=sysno; "syscall");
-      Ok(Some((sysno, path)))
+      Ok(vec![SyscallTarget {
+        operation: Operation::Delete,
+        sysno,
+        path,
+      }])
     }
     Some(sysno @ Sysno::renameat) => {
       let mut oldname = match regs.rdi {
-        AT_FDCWD => get_cwd(pid).context("renameat: get old cwd")?,
+        AT_FDCWD64 | AT_FDCWD => get_cwd(pid).context("renameat: get old cwd")?,
         dirfd => get_fd_path(pid, dirfd as i32)
           .with_context(|| format!("renameat: get old fd path {:x}", regs.rdi))?,
       };
       oldname.push(read_path(pid, regs.rsi as u64).context("renameat: get old path")?);
       let mut newname = match regs.rdx {
-        AT_FDCWD => get_cwd(pid).context("renameat: get new cwd")?,
+        AT_FDCWD64 | AT_FDCWD => get_cwd(pid).context("renameat: get new cwd")?,
         dirfd => get_fd_path(pid, dirfd as i32)
           .with_context(|| format!("renameat: get new fd path {:x}", regs.rdi))?,
       };
       newname.push(read_path(pid, regs.r10 as u64).context("renameat: get new path")?);
       debug!(pid:? = pid, oldname:?= oldname, newname:? = newname, sysno:?=sysno; "syscall");
-      Ok(Some((sysno, newname)))
+      Ok(vec![
+        SyscallTarget {
+          operation: Operation::Delete,
+          sysno,
+          path: oldname,
+        },
+        SyscallTarget {
+          operation: Operation::Modify,
+          sysno,
+          path: newname,
+        },
+      ])
     }
     Some(sysno @ Sysno::linkat) => {
       let mut oldpath = match regs.rdi {
-        AT_FDCWD => get_cwd(pid).context("linkat: get old cwd")?,
+        AT_FDCWD64 | AT_FDCWD => get_cwd(pid).context("linkat: get old cwd")?,
         dirfd => get_fd_path(pid, dirfd as i32)
           .with_context(|| format!("linkat: get old fd path {:x}", regs.rdi))?,
       };
       oldpath.push(read_path(pid, regs.rsi as u64).context("linkat: get old path")?);
       let mut newpath = match regs.rdx {
-        AT_FDCWD => get_cwd(pid).context("linkat: get new cwd")?,
+        AT_FDCWD64 | AT_FDCWD => get_cwd(pid).context("linkat: get new cwd")?,
         dirfd => get_fd_path(pid, dirfd as i32)
           .with_context(|| format!("linkat: get new fd path {:x}", regs.rdi))?,
       };
       newpath.push(read_path(pid, regs.rsi as u64).context("linkat: get new path")?);
       debug!(pid:? = pid, oldpath:?= oldpath, newpath:? = newpath, sysno:?=sysno; "syscall");
-      Ok(Some((sysno, newpath)))
+      Ok(vec![SyscallTarget {
+        operation: Operation::Modify,
+        sysno,
+        path: newpath,
+      }])
     }
     Some(sysno @ Sysno::symlinkat) => {
       let mut oldpath = match regs.rdi {
-        AT_FDCWD => get_cwd(pid).context("symlinkat: get old cwd")?,
+        AT_FDCWD64 | AT_FDCWD => get_cwd(pid).context("symlinkat: get old cwd")?,
         dirfd => get_fd_path(pid, dirfd as i32)
           .with_context(|| format!("symlinkat: get old fd path {:x}", regs.rdi))?,
       };
       oldpath.push(read_path(pid, regs.rsi as u64).context("symlinkat: get old path")?);
       let mut newpath = match regs.rdx {
-        AT_FDCWD => get_cwd(pid).context("symlinkat: get new cwd")?,
+        AT_FDCWD64 | AT_FDCWD => get_cwd(pid).context("symlinkat: get new cwd")?,
         dirfd => get_fd_path(pid, dirfd as i32)
           .with_context(|| format!("symlinkat: get new fd path {:x}", regs.rdi))?,
       };
       newpath.push(read_path(pid, regs.r10 as u64).context("symlinkat: get new path")?);
       debug!(pid:? = pid, oldpath:?= oldpath, newpath:? = newpath, sysno:?=sysno; "syscall");
-      Ok(Some((sysno, newpath)))
+      Ok(vec![SyscallTarget {
+        operation: Operation::Modify,
+        sysno,
+        path: newpath,
+      }])
     }
     Some(sysno @ Sysno::renameat2) => {
       let mut oldpath = match regs.rdi {
-        AT_FDCWD => get_cwd(pid).context("renameat2: get old cwd")?,
+        AT_FDCWD64 | AT_FDCWD => get_cwd(pid).context("renameat2: get old cwd")?,
         dirfd => get_fd_path(pid, dirfd as i32)
           .with_context(|| format!("renameat2: get old fd path {:x}", regs.rdi))?,
       };
       oldpath.push(read_path(pid, regs.rsi as u64).context("renameat2: get old path")?);
       let mut newpath = match regs.rdx {
-        AT_FDCWD => get_cwd(pid).context("renameat2: get new cwd")?,
+        AT_FDCWD64 | AT_FDCWD => get_cwd(pid).context("renameat2: get new cwd")?,
         dirfd => get_fd_path(pid, dirfd as i32)
           .with_context(|| format!("renameat2: get new fd path {:x}", regs.rdi))?,
       };
       newpath.push(read_path(pid, regs.r10 as u64).context("renameat2: get new path")?);
       debug!(pid:? = pid, oldpath:?= oldpath, newpath:? = newpath, sysno:?=sysno; "syscall");
-      Ok(Some((sysno, newpath)))
+      Ok(vec![
+        SyscallTarget {
+          operation: Operation::Delete,
+          sysno,
+          path: oldpath,
+        },
+        SyscallTarget {
+          operation: Operation::Modify,
+          sysno,
+          path: newpath,
+        },
+      ])
     }
     Some(sysno @ Sysno::openat2) => {
       let mut path = match regs.rdi {
-        AT_FDCWD => get_cwd(pid).context("openat2: get cwd")?,
+        AT_FDCWD64 | AT_FDCWD => get_cwd(pid).context("openat2: get cwd")?,
         dirfd => get_fd_path(pid, dirfd as i32)
           .with_context(|| format!("openat2: get fd path {:x}", regs.rdi))?,
       };
       path.push(read_path(pid, regs.rsi as u64)?);
       let accmode = (regs.rdx & OFlag::O_ACCMODE.bits() as u64) as c_int;
       if accmode != OFlag::O_WRONLY.bits() && accmode != OFlag::O_RDWR.bits() {
-        return Ok(None);
+        return Ok(vec![]);
       }
       debug!(pid:? = pid, filename:?= path, sysno:?=sysno; "syscall");
-      Ok(Some((sysno, path)))
+      Ok(vec![SyscallTarget {
+        operation: Operation::Modify,
+        sysno,
+        path,
+      }])
     }
     Some(sysno) => {
       debug!(pid:? = pid, sysno:?=sysno.name(); "syscall");
 
-      Ok(None)
+      Ok(vec![])
     }
     None => {
       // We don't know what this is.
-      Ok(None)
+      Ok(vec![])
     }
   }
 }
@@ -272,34 +360,30 @@ impl std::error::Error for SandboxError {
 }
 
 /// Inspect the tracee's syscall that is about to be executed.
-fn handle_syscall(pid: Pid, options: &SandboxOptions) -> Result<()> {
-  if let Some((sysno, path)) = get_target_path(pid).context("get_taget_path")? {
-    for forbidden_path in &options.forbidden_paths {
-      if Some(forbidden_path.as_str()) == path.as_path().to_str() {
+fn handle_syscall(pid: Pid, options: &Options) -> Result<()> {
+  for target in get_syscall_targets(pid).context("get_taget_path")? {
+    let path_str = match target.path.as_path().to_str() {
+      Some(path_str) => path_str,
+      None => {
+        continue;
+      }
+    };
+    for rule in &options.rules {
+      if target.operation != rule.operation {
+        continue;
+      }
+      for prefix in &rule.prefixes {
+        if !path_str.starts_with(prefix) {
+          continue;
+        }
         return Err(
           SandboxError {
-            sysno,
-            message: options.forbidden_path_message.clone(),
-            path,
+            sysno: target.sysno,
+            message: rule.message.clone(),
+            path: target.path,
           }
           .into(),
         );
-      }
-    }
-    if sysno == Sysno::unlink || sysno == Sysno::unlinkat {
-      for forbidden_unlink_prefix in &options.forbidden_unlink_prefixes {
-        if let Some(path_str) = path.as_path().to_str() {
-          if path_str.starts_with(forbidden_unlink_prefix) {
-            return Err(
-              SandboxError {
-                sysno,
-                message: options.forbidden_unlink_message.clone(),
-                path,
-              }
-              .into(),
-            );
-          }
-        }
       }
     }
   }
@@ -316,7 +400,7 @@ extern "C" fn forward_signal(signum: c_int) {
 }
 
 /// Run the tracee under the sandbox.
-fn run_parent(main_pid: Pid, options: &SandboxOptions) -> Result<i32> {
+fn run_parent(main_pid: Pid, options: &Options) -> Result<i32> {
   unsafe {
     CHILD_PID = main_pid;
     // Forward all signals to the child process.
@@ -509,12 +593,28 @@ fn run_parent(main_pid: Pid, options: &SandboxOptions) -> Result<i32> {
   Ok(0)
 }
 
+#[derive(PartialEq, Eq, Clone)]
+pub enum Operation {
+  Modify,
+  Delete,
+}
+
+/// Sandboxing rules. Deleting / modifying a path with any of the prefixes is forbidden and will
+/// cause process termination.
+#[derive(Clone)]
+pub struct Rule {
+  /// The forbidden operation.
+  pub operation: Operation,
+  /// The list of prefixes that are matched by this rule.
+  pub prefixes: Vec<String>,
+  /// The message to be shown if this rule triggers.
+  pub message: String,
+}
+
 /// Options for the sandbox.
-pub struct SandboxOptions {
-  pub forbidden_paths: Vec<String>,
-  pub forbidden_path_message: String,
-  pub forbidden_unlink_prefixes: Vec<String>,
-  pub forbidden_unlink_message: String,
+#[derive(Clone)]
+pub struct Options {
+  pub rules: Vec<Rule>,
 }
 
 /// Install a sandbox in "the current process".
@@ -524,7 +624,7 @@ pub struct SandboxOptions {
 /// This is intended to be used as a "pre-execve" hook.
 ///
 /// Modifying the forbidden paths / unlinking the forbidden prefixes will result in the sandboxed process being killed.
-pub fn install_sandbox(options: SandboxOptions) -> Result<()> {
+pub fn install_sandbox(options: Options) -> Result<()> {
   // Reset signal handlers
   for signum in Signal::iterator() {
     if signum == Signal::SIGKILL || signum == Signal::SIGCHLD || signum == Signal::SIGSTOP {
@@ -594,16 +694,6 @@ mod tests {
   use nix::unistd::dup2;
   use tempfile::TempDir;
 
-  /// List of paths that are forbidden to modify.
-  const FORBIDDEN_PATHS: &[&str] = &[
-    "/home/runner/workspace/.replit",
-    "/home/runner/workspace/replit.nix",
-    "/home/runner/workspace/.git/refs/replit/agent-ledger",
-  ];
-
-  /// List of prefixes that are forbidden to delete.
-  const FORBIDDEN_UNLINK_PREFIXES: &[&str] = &["/home/runner/workspace/.git/"];
-
   fn test_install_sandbox(f: fn() -> !, tempdir: &Path) -> Result<(i32, String, String)> {
     let stdout_path = tempdir.join("stdout.txt");
     let stdout_file = File::create(&stdout_path).context("create stdout")?;
@@ -625,14 +715,23 @@ mod tests {
           }
           drop(stderr_file);
 
-          if let Err(err) = install_sandbox(SandboxOptions {
-            forbidden_paths: FORBIDDEN_PATHS.iter().map(|&s| s.into()).collect(),
-            forbidden_path_message: "Tried to modify a forbidden path".to_string(),
-            forbidden_unlink_prefixes: FORBIDDEN_UNLINK_PREFIXES
-              .iter()
-              .map(|&s| s.into())
-              .collect(),
-            forbidden_unlink_message: "Tried to delete a forbidden path".to_string(),
+          if let Err(err) = install_sandbox(Options {
+            rules: vec![
+              Rule {
+                operation: Operation::Modify,
+                prefixes: vec![
+                  "/home/runner/workspace/.replit".to_string(),
+                  "/home/runner/workspace/replit.nix".to_string(),
+                  "/home/runner/workspace/.git/refs/replit/agent-ledger".to_string(),
+                ],
+                message: "Tried to modify a forbidden path".to_string(),
+              },
+              Rule {
+                operation: Operation::Delete,
+                prefixes: vec!["/home/runner/workspace/.git/".to_string()],
+                message: "Tried to delete a forbidden path".to_string(),
+              },
+            ],
           }) {
             eprintln!("failed to fork sandbox: {err}");
             unsafe { libc::_exit(4) };

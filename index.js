@@ -321,8 +321,10 @@ if (!nativeBinding) {
   throw new Error(`Failed to load native binding`);
 }
 
-const { Pty, ptyResize, setCloseOnExec, getCloseOnExec } = nativeBinding;
+const { Operation, Pty, ptyResize, setCloseOnExec, getCloseOnExec } =
+  nativeBinding;
 
+module.exports.Operation = Operation;
 module.exports.Pty = Pty;
 module.exports.ptyResize = ptyResize;
 module.exports.setCloseOnExec = setCloseOnExec;
