@@ -7,9 +7,14 @@ import {
   getCloseOnExec as rawGetCloseOnExec,
   ptyResize,
 } from './index.js';
-import { type PtyOptions as RawOptions } from './index.js';
+import {
+  type PtyOptions,
+  Operation,
+  type SandboxRule,
+  type SandboxOptions,
+} from './index.js';
 
-export type PtyOptions = RawOptions;
+export { Operation, type SandboxRule, type SandboxOptions, type PtyOptions };
 
 type ExitResult = {
   error: NodeJS.ErrnoException | null;
