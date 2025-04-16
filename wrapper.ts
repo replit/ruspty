@@ -117,7 +117,7 @@ export class Pty {
         const code = err.code;
         if (code === 'EINTR' || code === 'EAGAIN') {
           // these two are expected. EINTR happens when the kernel restarts a `read(2)`/`write(2)`
-          // syscall due to it being interrupted by another syscall, and E$AGAIN happens when there
+          // syscall due to it being interrupted by another syscall, and EAGAIN happens when there
           // is no more data to be read by the fd.
           return;
         } else if (code.indexOf('EIO') !== -1) {
