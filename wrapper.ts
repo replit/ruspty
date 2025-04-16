@@ -21,6 +21,9 @@ type ExitResult = {
   code: number;
 };
 
+export const MIN_SIZE = 0;
+export const MAX_SIZE = 65535; // max value of u16
+
 /**
  * A very thin wrapper around PTYs and processes.
  *
@@ -114,7 +117,7 @@ export class Pty {
         const code = err.code;
         if (code === 'EINTR' || code === 'EAGAIN') {
           // these two are expected. EINTR happens when the kernel restarts a `read(2)`/`write(2)`
-          // syscall due to it being interrupted by another syscall, and EAGAIN happens when there
+          // syscall due to it being interrupted by another syscall, and E$AGAIN happens when there
           // is no more data to be read by the fd.
           return;
         } else if (code.indexOf('EIO') !== -1) {
@@ -147,6 +150,17 @@ export class Pty {
   resize(size: Size) {
     if (this.#handledClose || this.#fdClosed) {
       return;
+    }
+
+    if (
+      size.cols < MIN_SIZE ||
+      size.cols > MAX_SIZE ||
+      size.rows < MIN_SIZE ||
+      size.rows > MAX_SIZE
+    ) {
+      throw new RangeError(
+        `Size (${size.rows}x${size.cols}) out of range: must be between ${MIN_SIZE} and ${MAX_SIZE}`,
+      );
     }
 
     try {
