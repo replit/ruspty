@@ -1,4 +1,4 @@
-import { Pty, getCloseOnExec, setCloseOnExec } from '../wrapper';
+import { Pty, getCloseOnExec, setCloseOnExec, Operation } from '../wrapper';
 import { type Writable } from 'stream';
 import { readdirSync, readlinkSync } from 'fs';
 import { mkdir, rm, mkdtemp } from 'node:fs/promises';
@@ -540,13 +540,34 @@ describe('cgroup opts', () => {
       // create a new cgroup with the right permissions
       await exec('sudo mkdir -p /sys/fs/cgroup/test.slice');
       await exec('sudo chown -R $(id -u):$(id -g) /sys/fs/cgroup/test.slice');
+      // Explicitly grant write permission to the control file
+      // Use cgroup.procs for v2, potentially try 'tasks' if this doesn't work (for v1)
+      try {
+        await exec('sudo chmod +w /sys/fs/cgroup/test.slice/cgroup.procs');
+      } catch (e) {
+        // If cgroup.procs doesn't exist or chmod fails, try 'tasks' for cgroup v1 compatibility
+        console.warn('Failed to chmod cgroup.procs, trying tasks file for cgroup v1:', e);
+        try {
+          await exec('sudo chmod +w /sys/fs/cgroup/test.slice/tasks');
+        } catch (e2) {
+           console.error('Failed to chmod both cgroup.procs and tasks:', e2);
+           // Decide if you want to throw here or let the test potentially fail later
+        }
+      }
     }
   });
 
   afterEach(async () => {
     if (!IS_DARWIN) {
-      // remove the cgroup
-      await exec('sudo rmdir /sys/fs/cgroup/test.slice');
+      // Best effort cleanup - might fail if permissions got messed up
+      try {
+          await exec('sudo rmdir /sys/fs/cgroup/test.slice');
+      } catch (e) {
+          console.warn('Failed to remove cgroup slice:', e);
+          // Consider trying to remove contents first if rmdir fails
+          // await exec('sudo find /sys/fs/cgroup/test.slice -mindepth 1 -delete');
+          // await exec('sudo rmdir /sys/fs/cgroup/test.slice');
+      }
     }
   });
 
@@ -614,12 +635,12 @@ describe('sandbox opts', { repeats: 10 }, () => {
       sandbox: {
         rules: [
           {
-            operation: 'Modify',
+            operation: Operation.Modify,
             prefixes: [tempDirPath],
             message: 'Tried to modify a forbidden path',
           },
           {
-            operation: 'Delete',
+            operation: Operation.Delete,
             prefixes: [tempDirPath],
             message: 'Tried to delete a forbidden path',
           },
@@ -652,14 +673,14 @@ describe('sandbox opts', { repeats: 10 }, () => {
       sandbox: {
         rules: [
           {
-            operation: 'Delete',
+            operation: Operation.Delete,
             prefixes: [gitPath],
             message: 'Tried to delete a forbidden path',
           },
         ],
       },
       envs: {
-        PATH: process.env.PATH,
+        PATH: process.env.PATH ?? '',
       },
       onExit,
     });
