@@ -538,10 +538,7 @@ describe('cgroup opts', () => {
   beforeEach(async () => {
     if (!IS_DARWIN) {
       // create a new cgroup with the right permissions
-      await exec(
-        `sudo bash -c "echo '+cpu' > /sys/fs/cgroup/cgroup.subtree_control"`,
-      );
-      await exec("sudo cgcreate -g 'cpu,cpuacct:/test.slice'");
+      await exec('sudo mkdir -p /sys/fs/cgroup/test.slice');
       await exec('sudo chown -R $(id -u):$(id -g) /sys/fs/cgroup/test.slice');
     }
   });
@@ -549,7 +546,7 @@ describe('cgroup opts', () => {
   afterEach(async () => {
     if (!IS_DARWIN) {
       // remove the cgroup
-      await exec('sudo cgdelete cpu,cpuacct:/test.slice');
+      await exec('sudo rmdir /sys/fs/cgroup/test.slice');
     }
   });
 
