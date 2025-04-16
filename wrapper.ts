@@ -6,6 +6,8 @@ import {
   setCloseOnExec as rawSetCloseOnExec,
   getCloseOnExec as rawGetCloseOnExec,
   ptyResize,
+  MAX_U16_VALUE,
+  MIN_U16_VALUE,
 } from './index.js';
 import {
   type PtyOptions,
@@ -20,9 +22,6 @@ type ExitResult = {
   error: NodeJS.ErrnoException | null;
   code: number;
 };
-
-export const MIN_SIZE = 0;
-export const MAX_SIZE = 65535; // max value of u16
 
 /**
  * A very thin wrapper around PTYs and processes.
@@ -153,13 +152,13 @@ export class Pty {
     }
 
     if (
-      size.cols < MIN_SIZE ||
-      size.cols > MAX_SIZE ||
-      size.rows < MIN_SIZE ||
-      size.rows > MAX_SIZE
+      size.cols < MIN_U16_VALUE ||
+      size.cols > MAX_U16_VALUE ||
+      size.rows < MIN_U16_VALUE ||
+      size.rows > MAX_U16_VALUE
     ) {
       throw new RangeError(
-        `Size (${size.rows}x${size.cols}) out of range: must be between ${MIN_SIZE} and ${MAX_SIZE}`,
+        `Size (${size.rows}x${size.cols}) out of range: must be between ${MIN_U16_VALUE} and ${MAX_U16_VALUE}`,
       );
     }
 
