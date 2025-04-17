@@ -1,9 +1,9 @@
-import { Pty, getCloseOnExec, setCloseOnExec } from '../wrapper';
+import { Pty, getCloseOnExec, setCloseOnExec, Operation } from '../wrapper';
 import { type Writable } from 'stream';
 import { readdirSync, readlinkSync } from 'fs';
 import { mkdir, rm, mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import path, { join } from 'node:path';
 import {
   describe,
   test,
@@ -500,16 +500,20 @@ describe.only('cgroup opts', () => {
 
   beforeEach(async () => {
     if (!IS_DARWIN) {
-      await exec(`sudo mkdir -p ${CG_TEST_SLICE}`);
-      await exec(`sudo chown -R $(id -u):$(id -g) ${CG_TEST_SLICE}`);
-      await exec(`echo ${process.pid} | sudo tee ${CG_TEST_SLICE}/cgroup.procs`);
+      const CG_ROOT = '/sys/fs/cgroup';
+      const SLICE = 'test.slice';
+      const SLICE_DIR = path.join(CG_ROOT, SLICE);
+
+      await exec(`sudo mkdir -p ${SLICE_DIR}`);
+      await exec(`sudo chown -R $(id -u):$(id -g) ${SLICE_DIR}`);
+      await exec(`echo ${process.pid} | sudo tee ${SLICE_DIR}/cgroup.procs`);
     }
   });
 
   afterEach(async () => {
     if (!IS_DARWIN) {
       // remove the cgroup
-      await exec(`sudo rm -rf ${CG_TEST_SLICE}`);
+      await exec(`sudo cgdelete cpu:/test.slice`);
     }
   });
 
@@ -577,12 +581,12 @@ describe('sandbox opts', { repeats: 10 }, () => {
       sandbox: {
         rules: [
           {
-            operation: 'Modify',
+            operation: Operation.Modify,
             prefixes: [tempDirPath],
             message: 'Tried to modify a forbidden path',
           },
           {
-            operation: 'Delete',
+            operation: Operation.Delete,
             prefixes: [tempDirPath],
             message: 'Tried to delete a forbidden path',
           },
@@ -615,15 +619,15 @@ describe('sandbox opts', { repeats: 10 }, () => {
       sandbox: {
         rules: [
           {
-            operation: 'Delete',
+            operation: Operation.Delete,
             prefixes: [gitPath],
             message: 'Tried to delete a forbidden path',
           },
         ],
       },
-      envs: {
+      envs: process.env.PATH ? {
         PATH: process.env.PATH,
-      },
+      } : {},
       onExit,
     });
 
