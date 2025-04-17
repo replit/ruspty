@@ -500,7 +500,7 @@ describe('cgroup opts', () => {
       // create a new cgroup with the right permissions
       await exec("sudo cgcreate -g 'cpu:/test.slice'");
       await exec(
-        'sudo chown -R $(id -u):$(id -g) /sys/fs/cgroup/cpu/test.slice',
+        'sudo chown -R $(id -u):$(id -g) /sys/fs/cgroup/test.slice',
       );
     }
   });
@@ -520,7 +520,7 @@ describe('cgroup opts', () => {
     const pty = new Pty({
       command: '/bin/cat',
       args: ['/proc/self/cgroup'],
-      cgroupPath: '/sys/fs/cgroup/cpu/test.slice',
+      cgroupPath: '/sys/fs/cgroup/test.slice',
       onExit,
     });
 
@@ -540,7 +540,7 @@ describe('cgroup opts', () => {
       new Pty({
         command: '/bin/cat',
         args: ['/proc/self/cgroup'],
-        cgroupPath: '/sys/fs/cgroup/cpu/test.slice',
+        cgroupPath: '/sys/fs/cgroup/test.slice',
         onExit: vi.fn(),
       });
     }).toThrowError();
