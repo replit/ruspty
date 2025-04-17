@@ -494,7 +494,7 @@ describe('PTY', { repeats: 500 }, () => {
   });
 });
 
-describe('cgroup opts', () => {
+describe.only('cgroup opts', () => {
   beforeEach(async () => {
     if (!IS_DARWIN) {
       // create a new cgroup with the right permissions
@@ -502,6 +502,7 @@ describe('cgroup opts', () => {
       await exec(
         'sudo chown -R $(id -u):$(id -g) /sys/fs/cgroup/test.slice',
       );
+      await exec('sudo chmod 777 /sys/fs/cgroup/test.slice');
     }
   });
 
