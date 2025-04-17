@@ -70,6 +70,9 @@ jobs:
         run: |
           sudo apt update
           sudo apt install -y cgroup-tools
+      - name: Add cpu controller to cgroup
+        run: |
+          sudo bash -c 'echo '+cpu' > /sys/fs/cgroup/cgroup.subtree_control'
       - name: Test bindings
         run: npm run test:ci
       - name: Upload artifact
