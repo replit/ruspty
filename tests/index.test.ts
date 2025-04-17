@@ -495,21 +495,21 @@ describe('PTY', { repeats: 500 }, () => {
 });
 
 describe.only('cgroup opts', () => {
+  const CG_ROOT = '/sys/fs/cgroup';
+  const CG_TEST_SLICE = `${CG_ROOT}/test.slice`;
+
   beforeEach(async () => {
     if (!IS_DARWIN) {
-      // create a new cgroup with the right permissions
-      await exec("sudo cgcreate -g 'cpu:/test.slice'");
-      await exec(
-        'sudo chown -R $(id -u):$(id -g) /sys/fs/cgroup/test.slice',
-      );
-      await exec('sudo chmod 777 /sys/fs/cgroup/test.slice');
+      await exec(`sudo mkdir -p ${CG_TEST_SLICE}`);
+      await exec(`sudo chown -R $(id -u):$(id -g) ${CG_TEST_SLICE}`);
+      await exec(`echo ${process.pid} | sudo tee ${CG_TEST_SLICE}/cgroup.procs`);
     }
   });
 
   afterEach(async () => {
     if (!IS_DARWIN) {
       // remove the cgroup
-      await exec('sudo cgdelete cpu:/test.slice');
+      await exec(`sudo rm -rf ${CG_TEST_SLICE}`);
     }
   });
 
