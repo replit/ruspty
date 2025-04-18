@@ -57,7 +57,7 @@ function getOpenFds(): FdRecord {
   return fds;
 }
 
-describe('PTY', { repeats: 0 }, () => {
+describe('PTY', { repeats: 500 }, () => {
   test('spawns and exits', async () => {
     const oldFds = getOpenFds();
     const message = 'hello from a pty';
@@ -504,12 +504,12 @@ describe('cgroup opts', async () => {
     SLICE = `ruspty-${Math.random().toString(36).substring(2, 15)}`;
     SLICE_DIR = join(CG_ROOT, SLICE);
     
-    // // Get the current process's cgroup path to restore it later
-    // const CGROUP_RAW = (await exec(`cat /proc/self/cgroup`)).stdout.trim();
-    // // Extract just the path portion from the cgroup format (e.g., "0::/user.slice/...")
-    // const CGROUP_PATH = CGROUP_RAW.split(':').pop() || '';
-    // // Construct the full filesystem path to the original cgroup
-    // ORIGINAL_CGROUP = join(CG_ROOT, CGROUP_PATH.replace(/^\//, ''));
+    // Get the current process's cgroup path to restore it later
+    const CGROUP_RAW = (await exec(`cat /proc/self/cgroup`)).stdout.trim();
+    // Extract just the path portion from the cgroup format (e.g., "0::/user.slice/...")
+    const CGROUP_PATH = CGROUP_RAW.split(':').pop() || '';
+    // Construct the full filesystem path to the original cgroup
+    ORIGINAL_CGROUP = join(CG_ROOT, CGROUP_PATH.replace(/^\//, ''));
   }
 
   beforeEach(async () => {
@@ -521,7 +521,7 @@ describe('cgroup opts', async () => {
       // add the current process to the slice
       // so the spawned pty inherits the slice - this is important because
       // child processes inherit their parent's cgroup by default
-      // await exec(`echo ${process.pid} | sudo tee ${SLICE_DIR}/cgroup.procs`);
+      await exec(`echo ${process.pid} | sudo tee ${SLICE_DIR}/cgroup.procs`);
     }
   });
 
@@ -529,9 +529,9 @@ describe('cgroup opts', async () => {
     if (!IS_DARWIN) {
       // remove the current process from the test slice and return it to its original cgroup
       // so it can be deleted
-      // await exec(
-      //   `echo ${process.pid} | sudo tee ${ORIGINAL_CGROUP}/cgroup.procs`,
-      // );
+      await exec(
+        `echo ${process.pid} | sudo tee ${ORIGINAL_CGROUP}/cgroup.procs`,
+      );
       await exec(`sudo rmdir ${SLICE_DIR}`);
     }
   });
