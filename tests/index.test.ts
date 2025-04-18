@@ -494,26 +494,27 @@ describe('PTY', { repeats: 500 }, () => {
   });
 });
 
-describe.only('cgroup opts', () => {
+describe.only('cgroup opts', async () => {
   const CG_ROOT = '/sys/fs/cgroup';
-  const CG_TEST_SLICE = `${CG_ROOT}/test.slice`;
+  const SLICE = 'test.slice';
+  const SLICE_DIR = path.join(CG_ROOT, SLICE);
+  const CGROUP_RAW = (await exec(`cat /proc/self/cgroup`)).stdout.trim();
+  const CGROUP_PATH = CGROUP_RAW.split(':').pop() || '';
+  const ORIGINAL_CGROUP = path.join(CG_ROOT, CGROUP_PATH.replace(/^\//, ''));
 
   beforeEach(async () => {
     if (!IS_DARWIN) {
-      const CG_ROOT = '/sys/fs/cgroup';
-      const SLICE = 'test.slice';
-      const SLICE_DIR = path.join(CG_ROOT, SLICE);
-
       await exec(`sudo mkdir -p ${SLICE_DIR}`);
       await exec(`sudo chown -R $(id -u):$(id -g) ${SLICE_DIR}`);
+
       await exec(`echo ${process.pid} | sudo tee ${SLICE_DIR}/cgroup.procs`);
     }
   });
 
   afterEach(async () => {
     if (!IS_DARWIN) {
-      // remove the cgroup
-      await exec(`sudo cgdelete cpu:/test.slice`);
+      await exec(`echo ${process.pid} | sudo tee ${ORIGINAL_CGROUP}/cgroup.procs`);
+      await exec(`sudo rmdir ${SLICE_DIR}`);
     }
   });
 
