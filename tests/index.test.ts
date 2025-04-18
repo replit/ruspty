@@ -495,12 +495,17 @@ describe('PTY', { repeats: 0 }, () => {
 });
 
 describe('cgroup opts', async () => {
-  const CG_ROOT = '/sys/fs/cgroup';
-  const SLICE = 'test.slice';
-  const SLICE_DIR = path.join(CG_ROOT, SLICE);
-  const CGROUP_RAW = (await exec(`cat /proc/self/cgroup`)).stdout.trim();
-  const CGROUP_PATH = CGROUP_RAW.split(':').pop() || '';
-  const ORIGINAL_CGROUP = path.join(CG_ROOT, CGROUP_PATH.replace(/^\//, ''));
+  let SLICE_DIR: string;
+  let ORIGINAL_CGROUP: string;
+  if (!IS_DARWIN) {
+    const CG_ROOT = '/sys/fs/cgroup';
+    // unique slice name
+    const SLICE = `ruspty-${Math.random().toString(36).substring(2, 15)}`;
+    SLICE_DIR = path.join(CG_ROOT, SLICE);
+    const CGROUP_RAW = (await exec(`cat /proc/self/cgroup`)).stdout.trim();
+    const CGROUP_PATH = CGROUP_RAW.split(':').pop() || '';
+    ORIGINAL_CGROUP = path.join(CG_ROOT, CGROUP_PATH.replace(/^\//, ''));
+  }
 
   beforeEach(async () => {
     if (!IS_DARWIN) {
@@ -528,7 +533,7 @@ describe('cgroup opts', async () => {
     const pty = new Pty({
       command: '/bin/cat',
       args: ['/proc/self/cgroup'],
-      cgroupPath: '/sys/fs/cgroup/test.slice',
+      cgroupPath: SLICE_DIR,
       onExit,
     });
 
@@ -539,7 +544,7 @@ describe('cgroup opts', async () => {
 
     await vi.waitFor(() => expect(onExit).toHaveBeenCalledTimes(1));
     expect(onExit).toHaveBeenCalledWith(null, 0);
-    expect(buffer).toContain('/test.slice');
+    expect(buffer).toContain(SLICE_DIR);
     expect(getOpenFds()).toStrictEqual(oldFds);
   });
 
