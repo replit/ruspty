@@ -65,9 +65,6 @@ jobs:
         shell: bash
       - name: Dump GLIBC symbols
         run: objdump -T *.node | grep GLIBC | sed 's/.*GLIBC_\([.0-9]*\).*/\1/g' | sort -Vu
-      - name: Add cpu controller to cgroup
-        run: |
-          sudo bash -c 'echo '+cpu' > /sys/fs/cgroup/cgroup.subtree_control'
       - name: Test bindings
         run: npm run test:ci
       - name: Upload artifact
