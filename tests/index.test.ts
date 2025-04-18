@@ -3,7 +3,7 @@ import { type Writable } from 'stream';
 import { readdirSync, readlinkSync } from 'fs';
 import { mkdir, rm, mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import path, { join } from 'node:path';
+import { join } from 'node:path';
 import {
   describe,
   test,
@@ -500,25 +500,35 @@ describe('cgroup opts', async () => {
   let SLICE: string;
   if (!IS_DARWIN) {
     const CG_ROOT = '/sys/fs/cgroup';
-    // unique slice name
+    // unique slice name to avoid conflicts with other test runs
     SLICE = `ruspty-${Math.random().toString(36).substring(2, 15)}`;
-    SLICE_DIR = path.join(CG_ROOT, SLICE);
+    SLICE_DIR = join(CG_ROOT, SLICE);
+    
+    // Get the current process's cgroup path to restore it later
     const CGROUP_RAW = (await exec(`cat /proc/self/cgroup`)).stdout.trim();
+    // Extract just the path portion from the cgroup format (e.g., "0::/user.slice/...")
     const CGROUP_PATH = CGROUP_RAW.split(':').pop() || '';
-    ORIGINAL_CGROUP = path.join(CG_ROOT, CGROUP_PATH.replace(/^\//, ''));
+    // Construct the full filesystem path to the original cgroup
+    ORIGINAL_CGROUP = join(CG_ROOT, CGROUP_PATH.replace(/^\//, ''));
   }
 
   beforeEach(async () => {
     if (!IS_DARWIN) {
+      // create the slice - this is the cgroup that will be used for testing
       await exec(`sudo mkdir -p ${SLICE_DIR}`);
       await exec(`sudo chown -R $(id -u):$(id -g) ${SLICE_DIR}`);
 
+      // add the current process to the slice
+      // so the spawned pty inherits the slice - this is important because
+      // child processes inherit their parent's cgroup by default
       await exec(`echo ${process.pid} | sudo tee ${SLICE_DIR}/cgroup.procs`);
     }
   });
 
   afterEach(async () => {
     if (!IS_DARWIN) {
+      // remove the current process from the test slice and return it to its original cgroup
+      // so it can be deleted
       await exec(
         `echo ${process.pid} | sudo tee ${ORIGINAL_CGROUP}/cgroup.procs`,
       );
@@ -545,6 +555,8 @@ describe('cgroup opts', async () => {
 
     await vi.waitFor(() => expect(onExit).toHaveBeenCalledTimes(1));
     expect(onExit).toHaveBeenCalledWith(null, 0);
+    // Verify that the process was placed in the correct cgroup by
+    // checking its output contains our unique slice name
     expect(buffer).toContain(SLICE);
     expect(getOpenFds()).toStrictEqual(oldFds);
   });
