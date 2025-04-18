@@ -6,6 +6,8 @@ import {
   setCloseOnExec as rawSetCloseOnExec,
   getCloseOnExec as rawGetCloseOnExec,
   ptyResize,
+  MAX_U16_VALUE,
+  MIN_U16_VALUE,
 } from './index.js';
 import {
   type PtyOptions,
@@ -147,6 +149,17 @@ export class Pty {
   resize(size: Size) {
     if (this.#handledClose || this.#fdClosed) {
       return;
+    }
+
+    if (
+      size.cols < MIN_U16_VALUE ||
+      size.cols > MAX_U16_VALUE ||
+      size.rows < MIN_U16_VALUE ||
+      size.rows > MAX_U16_VALUE
+    ) {
+      throw new RangeError(
+        `Size (${size.rows}x${size.cols}) out of range: must be between ${MIN_U16_VALUE} and ${MAX_U16_VALUE}`,
+      );
     }
 
     try {

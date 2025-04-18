@@ -492,6 +492,46 @@ describe('PTY', { repeats: 500 }, () => {
     await vi.waitFor(() => receivedError);
     expect(getOpenFds()).toStrictEqual(oldFds);
   });
+
+  test('cannot resize when out of range', async () => {
+    const oldFds = getOpenFds();
+    let buffer = '';
+
+    const onExit = vi.fn();
+    const pty = new Pty({
+      command: '/bin/sh',
+      size: { rows: 24, cols: 80 },
+      onExit,
+    });
+
+    pty.read.on('data', () => {});
+
+    expect(() => pty.resize({ rows: 1, cols: -1 })).toThrow(RangeError);
+    expect(() => pty.resize({ rows: 1, cols: -1 })).toThrow(
+      /Size \(1x-1\) out of range/,
+    );
+
+    expect(() => pty.resize({ rows: 1, cols: 99999 })).toThrow(RangeError);
+    expect(() => pty.resize({ rows: 1, cols: 99999 })).toThrow(
+      /Size \(1x99999\) out of range/,
+    );
+
+    expect(() => pty.resize({ rows: -1, cols: 1 })).toThrow(RangeError);
+    expect(() => pty.resize({ rows: -1, cols: 1 })).toThrow(
+      /Size \(-1x1\) out of range/,
+    );
+
+    expect(() => pty.resize({ rows: 99999, cols: 1 })).toThrow(RangeError);
+    expect(() => pty.resize({ rows: 99999, cols: 1 })).toThrow(
+      /Size \(99999x1\) out of range/,
+    );
+
+    process.kill(pty.pid, 'SIGKILL');
+
+    await vi.waitFor(() => expect(onExit).toHaveBeenCalledTimes(1));
+    expect(onExit).toHaveBeenCalledWith(null, -1);
+    expect(getOpenFds()).toStrictEqual(oldFds);
+  });
 });
 
 describe('cgroup opts', async () => {

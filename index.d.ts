@@ -40,6 +40,8 @@ export interface Size {
   cols: number;
   rows: number;
 }
+export const MAX_U16_VALUE: number;
+export const MIN_U16_VALUE: number;
 /** Resize the terminal. */
 export declare function ptyResize(fd: number, size: Size): void;
 /**

@@ -81,6 +81,11 @@ struct Size {
   pub rows: u16,
 }
 
+#[napi]
+pub const MAX_U16_VALUE: u16 = u16::MAX;
+#[napi]
+pub const MIN_U16_VALUE: u16 = u16::MIN;
+
 fn cast_to_napi_error(err: Errno) -> napi::Error {
   napi::Error::new(GenericFailure, err)
 }
