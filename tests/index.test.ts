@@ -503,7 +503,7 @@ describe('cgroup opts', async () => {
     // unique slice name to avoid conflicts with other test runs
     SLICE = `ruspty-${Math.random().toString(36).substring(2, 15)}`;
     SLICE_DIR = join(CG_ROOT, SLICE);
-    
+
     // Get the current process's cgroup path to restore it later
     const CGROUP_RAW = (await exec(`cat /proc/self/cgroup`)).stdout.trim();
     // Extract just the path portion from the cgroup format (e.g., "0::/user.slice/...")
