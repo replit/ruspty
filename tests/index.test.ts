@@ -57,7 +57,7 @@ function getOpenFds(): FdRecord {
   return fds;
 }
 
-describe('PTY', { repeats: 500 }, () => {
+describe('PTY', { repeats: 0 }, () => {
   test('spawns and exits', async () => {
     const oldFds = getOpenFds();
     const message = 'hello from a pty';
@@ -494,7 +494,7 @@ describe('PTY', { repeats: 500 }, () => {
   });
 });
 
-describe.only('cgroup opts', async () => {
+describe('cgroup opts', async () => {
   const CG_ROOT = '/sys/fs/cgroup';
   const SLICE = 'test.slice';
   const SLICE_DIR = path.join(CG_ROOT, SLICE);
@@ -525,21 +525,21 @@ describe.only('cgroup opts', async () => {
     let buffer = '';
     const onExit = vi.fn();
 
-    // const pty = new Pty({
-    //   command: '/bin/cat',
-    //   args: ['/proc/self/cgroup'],
-    //   cgroupPath: '/sys/fs/cgroup/test.slice',
-    //   onExit,
-    // });
+    const pty = new Pty({
+      command: '/bin/cat',
+      args: ['/proc/self/cgroup'],
+      cgroupPath: '/sys/fs/cgroup/test.slice',
+      onExit,
+    });
 
-    // const readStream = pty.read;
-    // readStream.on('data', (data) => {
-    //   buffer = data.toString();
-    // });
+    const readStream = pty.read;
+    readStream.on('data', (data) => {
+      buffer = data.toString();
+    });
 
-    // await vi.waitFor(() => expect(onExit).toHaveBeenCalledTimes(1));
-    // expect(onExit).toHaveBeenCalledWith(null, 0);
-    // expect(buffer).toContain('/test.slice');
+    await vi.waitFor(() => expect(onExit).toHaveBeenCalledTimes(1));
+    expect(onExit).toHaveBeenCalledWith(null, 0);
+    expect(buffer).toContain('/test.slice');
     expect(getOpenFds()).toStrictEqual(oldFds);
   });
 
