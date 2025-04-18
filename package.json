@@ -1,6 +1,6 @@
 {
   "name": "@replit/ruspty",
-  "version": "3.4.8",
+  "version": "3.4.9",
   "main": "dist/wrapper.js",
   "types": "dist/wrapper.d.ts",
   "author": "Szymon Kaliski <hi@szymonkaliski.com>",
