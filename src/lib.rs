@@ -220,7 +220,7 @@ impl Pty {
           let pid = libc::getpid();
           let cgroup_path = format!("{}/cgroup.procs", cgroup_path);
           let mut cgroup_file = File::create(cgroup_path)?;
-          cgroup_file.write_all(format!("{}", pid).as_bytes())?;
+          // cgroup_file.write_all(format!("{}", pid).as_bytes())?;
         }
 
         // become the controlling tty for the program.

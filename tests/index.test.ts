@@ -513,7 +513,9 @@ describe.only('cgroup opts', async () => {
 
   afterEach(async () => {
     if (!IS_DARWIN) {
-      await exec(`echo ${process.pid} | sudo tee ${ORIGINAL_CGROUP}/cgroup.procs`);
+      await exec(
+        `echo ${process.pid} | sudo tee ${ORIGINAL_CGROUP}/cgroup.procs`,
+      );
       await exec(`sudo rmdir ${SLICE_DIR}`);
     }
   });
@@ -626,9 +628,11 @@ describe('sandbox opts', { repeats: 10 }, () => {
           },
         ],
       },
-      envs: process.env.PATH ? {
-        PATH: process.env.PATH,
-      } : {},
+      envs: process.env.PATH
+        ? {
+            PATH: process.env.PATH,
+          }
+        : {},
       onExit,
     });
 
