@@ -48,8 +48,8 @@
     "format": "npx prettier *.{js,ts} tests/*.ts --write"
   },
   "optionalDependencies": {
-    "@replit/ruspty-darwin-x64": "3.4.7",
-    "@replit/ruspty-darwin-arm64": "3.4.7",
-    "@replit/ruspty-linux-x64-gnu": "3.4.7"
+    "@replit/ruspty-darwin-x64": "3.4.9",
+    "@replit/ruspty-darwin-arm64": "3.4.9",
+    "@replit/ruspty-linux-x64-gnu": "3.4.9"
   }
 }
