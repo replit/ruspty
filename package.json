@@ -46,10 +46,5 @@
     "version": "napi version",
     "release": "npm publish --access public",
     "format": "npx prettier *.{js,ts} tests/*.ts --write"
-  },
-  "optionalDependencies": {
-    "@replit/ruspty-darwin-x64": "3.4.9",
-    "@replit/ruspty-darwin-arm64": "3.4.9",
-    "@replit/ruspty-linux-x64-gnu": "3.4.9"
   }
 }
