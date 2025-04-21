@@ -565,6 +565,7 @@ async function getCgroupState(): Promise<CgroupState> {
 async function cgroupInit(cgroupState: CgroupState) {
   // create the slice - this is the cgroup that will be used for testing
   await exec(`sudo mkdir -p ${cgroupState.sliceDir}`);
+  await exec(`sudo chown -R $(id -u):$(id -g) ${cgroupState.sliceDir}`);
 
   // add the current process to the slice
   // so the spawned pty inherits the slice - this is important because
