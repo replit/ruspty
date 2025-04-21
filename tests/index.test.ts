@@ -541,11 +541,7 @@ type CgroupState = {
   moved: boolean;
 };
 
-async function getCgroupState(): Promise<CgroupState | null> {
-  if (IS_DARWIN) {
-    return null;
-  }
-
+async function getCgroupState(): Promise<CgroupState> {
   const CG_ROOT = '/sys/fs/cgroup';
   // unique slice name to avoid conflicts with other test runs
   const sliceName = `ruspty-${Math.random().toString(36).substring(2, 15)}.scope`;
@@ -591,25 +587,20 @@ async function cgroupCleanup(cgroupState: CgroupState) {
 }
 
 describe('cgroup opts', async () => {
-  let cgroupState: CgroupState | null;
-
+  let cgroupState: CgroupState | null = null;
   beforeEach(async () => {
     if (IS_DARWIN) {
       return;
     }
 
     cgroupState = await getCgroupState();
-    if (cgroupState !== null) {
-      cgroupInit(cgroupState);
-    }
-  });
+    await cgroupInit(cgroupState);
 
-  afterEach(async () => {
-    if (IS_DARWIN || cgroupState === null) {
-      return;
-    }
-
-    cgroupCleanup(cgroupState);
+    return async () => {
+      if (cgroupState) {
+        await cgroupCleanup(cgroupState);
+      }
+    };
   });
 
   testSkipOnDarwin('basic cgroup', async () => {
@@ -656,29 +647,25 @@ describe('cgroup opts', async () => {
 describe('sandbox opts', { repeats: 10 }, async () => {
   let tempDirPath = '/inexistent/path/before';
   let cgroupState: CgroupState | null;
-
   beforeEach(async () => {
-    if (IS_DARWIN || cgroupState === null) {
+    if (IS_DARWIN) {
       return;
     }
 
     cgroupState = await getCgroupState();
-    if (cgroupState !== null) {
-      cgroupInit(cgroupState);
-    }
+    await cgroupInit(cgroupState);
     tempDirPath = await mkdtemp(join(tmpdir(), 'ruspty-'));
-  });
 
-  afterEach(async () => {
-    if (IS_DARWIN || cgroupState === null) {
-      return;
-    }
+    return async () => {
+      if (cgroupState) {
+        await cgroupCleanup(cgroupState);
+      }
 
-    cgroupCleanup(cgroupState);
-    if (tempDirPath !== '/inexistent/path/before') {
-      await rm(tempDirPath, { recursive: true });
-      tempDirPath = '/inexistent/path/after';
-    }
+      if (tempDirPath !== '/inexistent/path/before') {
+        await rm(tempDirPath, { recursive: true });
+        tempDirPath = '/inexistent/path/after';
+      }
+    };
   });
 
   testSkipOnDarwin('basic sandbox', async () => {
