@@ -534,49 +534,81 @@ describe('PTY', { repeats: 500 }, () => {
   });
 });
 
-describe('cgroup opts', async () => {
-  let SLICE_DIR: string;
-  let ORIGINAL_CGROUP: string;
-  let SLICE: string;
-  if (!IS_DARWIN) {
-    const CG_ROOT = '/sys/fs/cgroup';
-    // unique slice name to avoid conflicts with other test runs
-    SLICE = `ruspty-${Math.random().toString(36).substring(2, 15)}`;
-    SLICE_DIR = join(CG_ROOT, SLICE);
+type CgroupState = {
+  sliceDir: string;
+  originalCgroup: string;
+  sliceName: string;
+  moved: boolean;
+};
 
-    // Get the current process's cgroup path to restore it later
-    const CGROUP_RAW = (await exec(`cat /proc/self/cgroup`)).stdout.trim();
-    // Extract just the path portion from the cgroup format (e.g., "0::/user.slice/...")
-    const CGROUP_PATH = CGROUP_RAW.split(':').pop() || '';
-    // Construct the full filesystem path to the original cgroup
-    ORIGINAL_CGROUP = join(CG_ROOT, CGROUP_PATH.replace(/^\//, ''));
+async function getCgroupState(): Promise<CgroupState> {
+  const CG_ROOT = '/sys/fs/cgroup';
+  // unique slice name to avoid conflicts with other test runs
+  const sliceName = `ruspty-${Math.random().toString(36).substring(2, 15)}.scope`;
+  const sliceDir = join(CG_ROOT, sliceName);
+
+  // Get the current process's cgroup path to restore it later
+  const cgroupRaw = (await exec(`cat /proc/self/cgroup`)).stdout.trim();
+  // Extract just the path portion from the cgroup format (e.g., "0::/user.slice/...")
+  const cgroupPath = cgroupRaw.split(':').pop() || '';
+  // Construct the full filesystem path to the original cgroup
+  const originalCgroup = join(CG_ROOT, cgroupPath.replace(/^\//, ''));
+
+  return {
+    sliceDir,
+    originalCgroup,
+    sliceName,
+    moved: false,
+  };
+}
+
+async function cgroupInit(cgroupState: CgroupState) {
+  // create the slice - this is the cgroup that will be used for testing
+  await exec(`sudo mkdir -p ${cgroupState.sliceDir}`);
+  await exec(`sudo chown -R $(id -u):$(id -g) ${cgroupState.sliceDir}`);
+
+  // add the current process to the slice
+  // so the spawned pty inherits the slice - this is important because
+  // child processes inherit their parent's cgroup by default
+  await exec(
+    `echo ${process.pid} | sudo tee ${cgroupState.sliceDir}/cgroup.procs`,
+  );
+  cgroupState.moved = true;
+}
+
+async function cgroupCleanup(cgroupState: CgroupState) {
+  // remove the current process from the test slice and return it to its original cgroup
+  // so it can be deleted
+  if (cgroupState.moved) {
+    await exec(
+      `echo ${process.pid} | sudo tee ${cgroupState.originalCgroup}/cgroup.procs`,
+    );
   }
+  await exec(`sudo rmdir ${cgroupState.sliceDir}`);
+}
 
+describe('cgroup opts', async () => {
+  let cgroupState: CgroupState | null = null;
   beforeEach(async () => {
-    if (!IS_DARWIN) {
-      // create the slice - this is the cgroup that will be used for testing
-      await exec(`sudo mkdir -p ${SLICE_DIR}`);
-      await exec(`sudo chown -R $(id -u):$(id -g) ${SLICE_DIR}`);
-
-      // add the current process to the slice
-      // so the spawned pty inherits the slice - this is important because
-      // child processes inherit their parent's cgroup by default
-      await exec(`echo ${process.pid} | sudo tee ${SLICE_DIR}/cgroup.procs`);
+    if (IS_DARWIN) {
+      return;
     }
-  });
 
-  afterEach(async () => {
-    if (!IS_DARWIN) {
-      // remove the current process from the test slice and return it to its original cgroup
-      // so it can be deleted
-      await exec(
-        `echo ${process.pid} | sudo tee ${ORIGINAL_CGROUP}/cgroup.procs`,
-      );
-      await exec(`sudo rmdir ${SLICE_DIR}`);
-    }
+    cgroupState = await getCgroupState();
+    await cgroupInit(cgroupState);
+
+    return async () => {
+      if (cgroupState) {
+        await cgroupCleanup(cgroupState);
+      }
+    };
   });
 
   testSkipOnDarwin('basic cgroup', async () => {
+    if (cgroupState === null) {
+      return;
+    }
+
     const oldFds = getOpenFds();
     let buffer = '';
     const onExit = vi.fn();
@@ -584,7 +616,7 @@ describe('cgroup opts', async () => {
     const pty = new Pty({
       command: '/bin/cat',
       args: ['/proc/self/cgroup'],
-      cgroupPath: SLICE_DIR,
+      cgroupPath: cgroupState.sliceDir,
       onExit,
     });
 
@@ -597,7 +629,7 @@ describe('cgroup opts', async () => {
     expect(onExit).toHaveBeenCalledWith(null, 0);
     // Verify that the process was placed in the correct cgroup by
     // checking its output contains our unique slice name
-    expect(buffer).toContain(SLICE);
+    expect(buffer).toContain(cgroupState.sliceName);
     expect(getOpenFds()).toStrictEqual(oldFds);
   });
 
@@ -613,25 +645,35 @@ describe('cgroup opts', async () => {
   });
 });
 
-describe('sandbox opts', { repeats: 10 }, () => {
+describe('sandbox opts', { repeats: 10 }, async () => {
   let tempDirPath = '/inexistent/path/before';
-
+  let cgroupState: CgroupState | null;
   beforeEach(async () => {
     if (IS_DARWIN) {
       return;
     }
-    tempDirPath = await mkdtemp(join(tmpdir(), 'ruspty-'));
-  });
 
-  afterEach(async () => {
-    if (IS_DARWIN) {
-      return;
-    }
-    await rm(tempDirPath, { recursive: true });
-    tempDirPath = '/inexistent/path/after';
+    cgroupState = await getCgroupState();
+    await cgroupInit(cgroupState);
+    tempDirPath = await mkdtemp(join(tmpdir(), 'ruspty-'));
+
+    return async () => {
+      if (cgroupState) {
+        await cgroupCleanup(cgroupState);
+      }
+
+      if (tempDirPath !== '/inexistent/path/before') {
+        await rm(tempDirPath, { recursive: true });
+        tempDirPath = '/inexistent/path/after';
+      }
+    };
   });
 
   testSkipOnDarwin('basic sandbox', async () => {
+    if (cgroupState === null) {
+      return;
+    }
+
     const oldFds = getOpenFds();
     let buffer = '';
     const onExit = vi.fn();
@@ -639,6 +681,7 @@ describe('sandbox opts', { repeats: 10 }, () => {
     const pty = new Pty({
       command: '/bin/sh',
       args: ['-c', 'echo hello'],
+      cgroupPath: cgroupState.sliceDir,
       sandbox: {
         rules: [
           {
@@ -668,6 +711,10 @@ describe('sandbox opts', { repeats: 10 }, () => {
   });
 
   testSkipOnDarwin('basic protection against git-yeetage', async () => {
+    if (cgroupState === null) {
+      return;
+    }
+
     const oldFds = getOpenFds();
     let buffer = '';
     const onExit = vi.fn();
@@ -677,6 +724,7 @@ describe('sandbox opts', { repeats: 10 }, () => {
     const pty = new Pty({
       command: '/bin/sh',
       args: ['-c', `/bin/sh -c "rm -rf ${gitPath}"`],
+      cgroupPath: cgroupState.sliceDir,
       sandbox: {
         rules: [
           {

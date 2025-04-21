@@ -164,6 +164,14 @@ impl Pty {
       ));
     }
 
+    #[cfg(target_os = "linux")]
+    if opts.sandbox.is_some() && opts.cgroup_path.is_none() {
+      return Err(napi::Error::new(
+        napi::Status::GenericFailure,
+        "cannot enable sandbox without cgroup",
+      ));
+    }
+
     let size = opts.size.unwrap_or(Size { cols: 80, rows: 24 });
     let window_size = Winsize {
       ws_col: size.cols,
@@ -213,12 +221,6 @@ impl Pty {
       // right before we spawn the child, we should do a bunch of setup
       // this is all run in the context of the child process
       cmd.pre_exec(move || {
-        // start a new session
-        let err = libc::setsid();
-        if err == -1 {
-          return Err(Error::new(ErrorKind::Other, "setsid"));
-        }
-
         // set the cgroup if specified
         #[cfg(target_os = "linux")]
         if let Some(cgroup_path) = &opts.cgroup_path {
@@ -226,10 +228,40 @@ impl Pty {
           let cgroup_path = format!("{}/cgroup.procs", cgroup_path);
           let mut cgroup_file = File::create(cgroup_path)?;
           cgroup_file.write_all(format!("{}", pid).as_bytes())?;
+
+          // also set the sandbox if specified. It's important for it to be in a cgroup so that we don't
+          // accidentally leak processes if something went wrong.
+          if let Some(sandbox_opts) = &opts.sandbox {
+            if let Err(err) = sandbox::install_sandbox(sandbox::Options {
+              rules: sandbox_opts
+                .rules
+                .iter()
+                .map(|rule| sandbox::Rule {
+                  operation: match rule.operation {
+                    Operation::Modify => sandbox::Operation::Modify,
+                    Operation::Delete => sandbox::Operation::Delete,
+                  },
+                  prefixes: rule.prefixes.clone(),
+                  message: rule.message.clone(),
+                })
+                .collect(),
+            }) {
+              return Err(Error::new(
+                ErrorKind::Other,
+                format!("install_sandbox: {:#?}", err),
+              ));
+            }
+          }
+        }
+
+        // start a new session
+        let err = libc::setsid();
+        if err == -1 {
+          return Err(Error::new(ErrorKind::Other, "setsid"));
         }
 
         // become the controlling tty for the program.
-        //nNote that TIOCSCTTY is not the same size in all platforms.
+        // Note that TIOCSCTTY is not the same size in all platforms.
         #[allow(clippy::useless_conversion)]
         let err = libc::ioctl(raw_user_fd, TIOCSCTTY.into(), 0);
         if err == -1 {
@@ -255,30 +287,6 @@ impl Pty {
         if let Ok(mut termios) = termios::tcgetattr(&user_fd) {
           termios.input_flags |= termios::InputFlags::IUTF8;
           termios::tcsetattr(&user_fd, SetArg::TCSANOW, &termios)?;
-        }
-
-        // set the sandbox if specified
-        #[cfg(target_os = "linux")]
-        if let Some(sandbox_opts) = &opts.sandbox {
-          if let Err(err) = sandbox::install_sandbox(sandbox::Options {
-            rules: sandbox_opts
-              .rules
-              .iter()
-              .map(|rule| sandbox::Rule {
-                operation: match rule.operation {
-                  Operation::Modify => sandbox::Operation::Modify,
-                  Operation::Delete => sandbox::Operation::Delete,
-                },
-                prefixes: rule.prefixes.clone(),
-                message: rule.message.clone(),
-              })
-              .collect(),
-          }) {
-            return Err(Error::new(
-              ErrorKind::Other,
-              format!("install_sandbox: {:#?}", err),
-            ));
-          }
         }
 
         // reset signal handlers

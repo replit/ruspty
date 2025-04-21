@@ -7,6 +7,7 @@
 /// Note that it is important for this whole library to consistently use [nix::libc::_exit] instead
 /// of [std::process:exit], because the latter runs atexit handlers, which will cause the process
 /// to segfault.
+use std::ffi::CStr;
 use std::fs::read_link;
 use std::panic::catch_unwind;
 use std::path::PathBuf;
@@ -15,6 +16,7 @@ use anyhow::{Context, Result};
 use log::{debug, error};
 use nix::fcntl::OFlag;
 use nix::libc::{self, c_int};
+use nix::sys::prctl::set_name;
 use nix::sys::ptrace;
 use nix::sys::signal::{kill, raise, signal, sigprocmask, SigSet, SigmaskHow, Signal};
 use nix::sys::wait::{wait, waitpid, WaitStatus};
@@ -401,6 +403,8 @@ extern "C" fn forward_signal(signum: c_int) {
 
 /// Run the tracee under the sandbox.
 fn run_parent(main_pid: Pid, options: &Options) -> Result<i32> {
+  set_name(CStr::from_bytes_with_nul(b"sandbox\0").context("create process name")?)
+    .context("set process name")?;
   unsafe {
     CHILD_PID = main_pid;
     // Forward all signals to the child process.
@@ -423,6 +427,16 @@ fn run_parent(main_pid: Pid, options: &Options) -> Result<i32> {
         }
       }
     }
+
+    // Close all open file descriptors, except stderr.
+    let close_range_flags: c_int = 0;
+    libc::syscall(libc::SYS_close_range, 0, 1, close_range_flags);
+    libc::syscall(
+      libc::SYS_close_range,
+      3,
+      libc::c_uint::MAX,
+      close_range_flags,
+    );
   }
 
   // The child process will send a SIGCHLD.
@@ -684,17 +698,18 @@ pub fn install_sandbox(options: Options) -> Result<()> {
 mod tests {
   use super::*;
 
-  use std::fs::{read, File};
+  use std::ffi::c_void;
+  use std::fs::{read, read_dir, File};
   use std::os::fd::AsRawFd;
   use std::os::unix::process::CommandExt;
   use std::path::Path;
   use std::process::Command;
 
   use nix::sys::wait::waitpid;
-  use nix::unistd::dup2;
+  use nix::unistd::{dup2, getppid};
   use tempfile::TempDir;
 
-  fn test_install_sandbox(f: fn() -> !, tempdir: &Path) -> Result<(i32, String, String)> {
+  fn test_install_sandbox(child: fn() -> !, tempdir: &Path) -> Result<(i32, String, String)> {
     let stdout_path = tempdir.join("stdout.txt");
     let stdout_file = File::create(&stdout_path).context("create stdout")?;
     let stderr_path = tempdir.join("stderr.txt");
@@ -736,7 +751,7 @@ mod tests {
             eprintln!("failed to fork sandbox: {err}");
             unsafe { libc::_exit(4) };
           }
-          f();
+          child()
         });
         if err.is_ok() {
           unsafe { libc::_exit(0) };
@@ -748,6 +763,7 @@ mod tests {
       ForkResult::Parent { child } => {
         drop(stdout_file);
         drop(stderr_file);
+
         let wait_status = match waitpid(child, None) {
           Ok(WaitStatus::Exited(_pid, exit_status)) => exit_status,
           Ok(wait_status) => {
@@ -783,6 +799,38 @@ mod tests {
     assert_eq!(
       test_install_sandbox(exec_hook, tmp_dir.path()).expect("test_install_sandbox"),
       (0, "hello\n".to_string(), "".to_string())
+    );
+  }
+
+  #[test]
+  fn it_doesnt_leak_fds() {
+    fn exec_hook() -> ! {
+      let self_fds = read_dir("/proc/self/fd")
+        .expect("read fds")
+        .map(|res| res.map(|e| e.file_name()))
+        .collect::<Result<Vec<_>, std::io::Error>>()
+        .expect("get paths");
+      let parent_fds = read_dir(format!("/proc/{}/fd", getppid()))
+        .expect("read fds")
+        .map(|res| res.map(|e| e.file_name()))
+        .collect::<Result<Vec<_>, std::io::Error>>()
+        .expect("get paths");
+      let result = format!("parent={:?}\nself={:?}\n", parent_fds, self_fds);
+      unsafe { libc::write(2, result.as_bytes().as_ptr() as *const c_void, result.len()) };
+      unsafe { libc::_exit(0) };
+    }
+
+    let tmp_dir =
+      TempDir::with_prefix("pid2sandbox-").expect("Failed to create temporary directory");
+    // The parent should only contain stderr. The child should only contain the three stdio fds
+    // plus a fourth fd: the one opening /proc/self/fd.
+    assert_eq!(
+      test_install_sandbox(exec_hook, tmp_dir.path()).expect("test_install_sandbox"),
+      (
+        0,
+        "".to_string(),
+        "parent=[\"2\"]\nself=[\"0\", \"1\", \"2\", \"3\"]\n".to_string()
+      )
     );
   }
 
