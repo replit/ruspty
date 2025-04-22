@@ -154,7 +154,6 @@ jobs:
   publish:
     name: Publish
     runs-on: ubuntu-24.04
-    container: ubuntu:20.04
     if: github.ref == 'refs/heads/main'
     needs:
       - test
