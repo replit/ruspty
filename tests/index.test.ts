@@ -544,13 +544,11 @@ type CgroupState = {
 };
 
 async function detectCgroupVersion(): Promise<'v1' | 'v2'> {
-  try {
-    // Check for the unified hierarchy mount, characteristic of v2
-    await exec('mountpoint -q /sys/fs/cgroup/unified');
-    return 'v2';
-  } catch (e) {
+    const cgroupRaw = (await exec('grep cgroup /proc/filesystems')).stdout.trim();
+    if (cgroupRaw.includes('cgroup2')) {
+      return 'v2';
+    }
     return 'v1';
-  }
 }
 
 async function getCgroupState(): Promise<CgroupState> {
