@@ -537,14 +537,22 @@ describe('PTY', { repeats: 500 }, () => {
   });
 });
 
-type CgroupState = {
-  version: 'v1' | 'v2';
-  sliceDir: string; // For v2: Full path to the slice dir. For v1: Base name for the group (e.g., "ruspty-xyz").
-  originalCgroup?: string; // For v2: Full path to original cgroup dir. For v1: Path within each hierarchy (e.g., "/user.slice").
-  sliceName: string; // For v2: the slice file name. For v1: Base name for the group (same as sliceDir).
-  moved: boolean;
-  v1Subsystems?: string[]; // Only for v1: List of subsystems to manage (e.g., ['cpu', 'memory']).
-};
+type CgroupState = 
+  | { 
+      version: 'v1';
+      sliceDir: string; // Full path for v1 group using primary subsystem (e.g., "/sys/fs/cgroup/cpu/ruspty-xyz")
+      originalCgroup?: string; // Path within each hierarchy (e.g., "/user.slice")
+      sliceName: string; // Base name for the group
+      moved: boolean;
+      v1Subsystems: string[]; // List of subsystems to manage (e.g., ['cpu', 'memory'])
+    }
+  | {
+      version: 'v2';
+      sliceDir: string; // Full path to the slice dir (e.g., "/sys/fs/cgroup/test.slice")
+      originalCgroup?: string; // Full path to original cgroup dir
+      sliceName: string; // The slice file name
+      moved: boolean;
+    };
 
 async function detectCgroupVersion(): Promise<'v1' | 'v2'> {
   const cgroupRaw = (await exec('grep cgroup /proc/filesystems')).stdout.trim();
@@ -597,7 +605,7 @@ async function getCgroupState(): Promise<CgroupState> {
 
     return {
       version,
-      sliceDir: sliceBaseName, // Use base name for v1 group name
+      sliceDir: `/sys/fs/cgroup/${v1Subsystems[0]}/${sliceBaseName}`, 
       originalCgroup, // Path relative to subsystem root
       sliceName: sliceBaseName, // Base name
       moved: false,
