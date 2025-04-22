@@ -35,14 +35,16 @@ jobs:
             container: ubuntu:20.04
     name: Build and test on ${{ matrix.settings.target }}
     runs-on: ${{ matrix.settings.host }}
-    container: ${{ matrix.settings.host == 'ubuntu-24.04' && matrix.settings.container || '' }}
+    container: 
+      image: ${{ matrix.settings.host == 'ubuntu-24.04' && matrix.settings.container || '' }}
+      options: --privileged
     steps:
       - uses: actions/checkout@v4
       - name: Install container dependencies
         if: matrix.settings.host == 'ubuntu-24.04'
         run: |
           apt-get update
-          apt-get install -y curl build-essential sudo
+          apt-get install -y curl build-essential sudo cgroup-tools
       - name: Setup node
         uses: actions/setup-node@v4
         with:
