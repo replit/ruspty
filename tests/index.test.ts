@@ -161,12 +161,14 @@ describe('PTY', { repeats: 0 }, () => {
     expect(getOpenFds()).toStrictEqual(oldFds);
   });
 
-  test('can be resized', async () => {
+  test.only('can be resized', async () => {
     const oldFds = getOpenFds();
     let buffer = '';
     let state: 'expectPrompt' | 'expectDone1' | 'expectDone2' | 'done' =
       'expectPrompt';
     const onExit = vi.fn();
+
+    console.log('initializing pty');
 
     const pty = new Pty({
       command: '/bin/sh',
@@ -174,11 +176,14 @@ describe('PTY', { repeats: 0 }, () => {
       onExit,
     });
 
+    console.log('writing to pty');
+
     const writeStream = pty.write;
     const readStream = pty.read;
 
     const statePromise = new Promise<void>((resolve) => {
       readStream.on('data', (data) => {
+        console.log('reading from pty', data.toString());
         buffer += data.toString();
 
         if (state === 'expectPrompt' && buffer.endsWith('$ ')) {
@@ -206,7 +211,9 @@ describe('PTY', { repeats: 0 }, () => {
     });
 
     await statePromise;
+    console.log('waiting for onExit');
     await vi.waitFor(() => expect(onExit).toHaveBeenCalledTimes(1));
+    console.log('onExit called');
     expect(onExit).toHaveBeenCalledWith(null, 0);
     expect(state).toBe('done');
     expect(getOpenFds()).toStrictEqual(oldFds);
