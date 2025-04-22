@@ -168,25 +168,23 @@ describe('PTY', { repeats: 0 }, () => {
       'expectPrompt';
     const onExit = vi.fn();
 
-    console.log('initializing pty');
-
     const pty = new Pty({
       command: '/bin/sh',
       size: { rows: 24, cols: 80 },
       onExit,
     });
 
-    console.log('writing to pty');
-
     const writeStream = pty.write;
     const readStream = pty.read;
 
     const statePromise = new Promise<void>((resolve) => {
       readStream.on('data', (data) => {
-        console.log('reading from pty', data.toString());
         buffer += data.toString();
-
-        if (state === 'expectPrompt' && (buffer.endsWith('$ ') || buffer.endsWith('# '))) {
+        // If the test is running in a container with privileged access, the prompt is #
+        if (
+          state === 'expectPrompt' &&
+          (buffer.endsWith('$ ') || buffer.endsWith('# '))
+        ) {
           writeStream.write("stty size; echo 'done1'\n");
           state = 'expectDone1';
           return;
@@ -211,9 +209,7 @@ describe('PTY', { repeats: 0 }, () => {
     });
 
     await statePromise;
-    console.log('waiting for onExit');
     await vi.waitFor(() => expect(onExit).toHaveBeenCalledTimes(1));
-    console.log('onExit called');
     expect(onExit).toHaveBeenCalledWith(null, 0);
     expect(state).toBe('done');
     expect(getOpenFds()).toStrictEqual(oldFds);
@@ -551,11 +547,11 @@ type CgroupState = {
 };
 
 async function detectCgroupVersion(): Promise<'v1' | 'v2'> {
-    const cgroupRaw = (await exec('grep cgroup /proc/filesystems')).stdout.trim();
-    if (cgroupRaw.includes('cgroup2')) {
-      return 'v2';
-    }
-    return 'v1';
+  const cgroupRaw = (await exec('grep cgroup /proc/filesystems')).stdout.trim();
+  if (cgroupRaw.includes('cgroup2')) {
+    return 'v2';
+  }
+  return 'v1';
 }
 
 async function getCgroupState(): Promise<CgroupState> {
@@ -580,21 +576,22 @@ async function getCgroupState(): Promise<CgroupState> {
   } else {
     // Determine available subsystems to manage (common ones)
     const availableSubsystems = readdirSync(CG_ROOT);
-    const v1Subsystems = ['cpu', 'memory', 'pids'].filter(sub => availableSubsystems.includes(sub));
-    // Find the process's current cgroup path within *one* hierarchy (e.g., memory)
-    // This is imperfect, as a process can be in different groups in different hierarchies,
-    // but usually sufficient for restoration.
-    let originalCgroup = '/'; // Default to root
-    try {
-        const cgroupRaw = (await exec(`cat /proc/self/cgroup`)).stdout.trim();
-        const memoryLine = cgroupRaw.split('\n').find(line => line.includes(':memory:'));
-        if (memoryLine) {
-            originalCgroup = memoryLine.split(':').pop() || '/';
-        }
-    } catch (e) {
-        console.warn("Could not reliably determine original cgroup v1 path, defaulting to '/'", e)
+    const v1Subsystems = ['cpu', 'memory'].filter((sub) =>
+      availableSubsystems.includes(sub),
+    );
+    let originalCgroup = '/';
+    const cgroupRaw = (await exec(`cat /proc/self/cgroup`)).stdout.trim();
+    const memoryLine = cgroupRaw
+      .split('\n')
+      .find((line) => line.includes(':memory:'));
+    const cpuLine = cgroupRaw
+      .split('\n')
+      .find((line) => line.includes(':cpu:'));
+    if (memoryLine) {
+      originalCgroup = memoryLine.split(':').pop() || '/';
+    } else if (cpuLine) {
+      originalCgroup = cpuLine.split(':').pop() || '/';
     }
-
 
     return {
       version,
@@ -614,8 +611,7 @@ async function cgroupInit(cgroupState: CgroupState) {
     await exec(`sudo chown -R $(id -u):$(id -g) ${cgroupState.sliceDir}`);
 
     // add the current process to the slice
-    // so the spawned pty inherits the slice - this is important because
-    // child processes inherit their parent's cgroup by default
+    // so the spawned pty inherits the slice
     await exec(
       `echo ${process.pid} | sudo tee ${cgroupState.sliceDir}/cgroup.procs`,
     );
@@ -623,7 +619,7 @@ async function cgroupInit(cgroupState: CgroupState) {
   } else {
     // cgroup v1 logic
     if (!cgroupState.v1Subsystems || cgroupState.v1Subsystems.length === 0) {
-        throw new Error("No cgroup v1 subsystems found or specified.");
+      throw new Error('No cgroup v1 subsystems found or specified.');
     }
     const subsystems = cgroupState.v1Subsystems.join(',');
     const groupPath = `/${cgroupState.sliceName}`;
@@ -647,26 +643,32 @@ async function cgroupCleanup(cgroupState: CgroupState) {
     await exec(`sudo rmdir ${cgroupState.sliceDir}`);
   } else {
     if (!cgroupState.v1Subsystems || cgroupState.v1Subsystems.length === 0) {
-        // Nothing to clean up if no subsystems were managed
-        return;
+      // Nothing to clean up if no subsystems were managed
+      return;
     }
-     const subsystems = cgroupState.v1Subsystems.join(',');
-     const groupPath = `/${cgroupState.sliceName}`;
-     // Move the current process back to its original group before deleting the test group.
-     // We determined originalCgroup path relative to subsystem root earlier.
-     // This assumes the original group still exists. Best effort restoration.
-     if (cgroupState.moved && cgroupState.originalCgroup) {
-         try {
-            // cgclassify might fail if the original group was removed or perms changed.
-             await exec(`sudo cgclassify -g ${subsystems}:${cgroupState.originalCgroup} ${process.pid}`);
-         } catch(e) {
-             console.warn(`Failed to move process ${process.pid} back to original cgroup v1 '${cgroupState.originalCgroup}'.`, e);
-             // Attempt to move to root as a fallback, might fail too.
-             try { await exec(`sudo cgclassify -g ${subsystems}:/ ${process.pid}`); } catch {}
-         }
-     }
-     
-     await exec(`sudo cgdelete -g ${subsystems}:${groupPath}`);
+    const subsystems = cgroupState.v1Subsystems.join(',');
+    const groupPath = `/${cgroupState.sliceName}`;
+    // Move the current process back to its original group before deleting the test group.
+    // We determined originalCgroup path relative to subsystem root earlier.
+    if (cgroupState.moved && cgroupState.originalCgroup) {
+      try {
+        // cgclassify might fail if the original group was removed or perms changed.
+        await exec(
+          `sudo cgclassify -g ${subsystems}:${cgroupState.originalCgroup} ${process.pid}`,
+        );
+      } catch (e) {
+        console.warn(
+          `Failed to move process ${process.pid} back to original cgroup v1 '${cgroupState.originalCgroup}'.`,
+          e,
+        );
+        // Attempt to move to root as a fallback, might fail too.
+        try {
+          await exec(`sudo cgclassify -g ${subsystems}:/ ${process.pid}`);
+        } catch {}
+      }
+    }
+
+    await exec(`sudo cgdelete -g ${subsystems}:${groupPath}`);
   }
 }
 
