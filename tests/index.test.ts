@@ -57,7 +57,7 @@ function getOpenFds(): FdRecord {
   return fds;
 }
 
-describe('PTY', { repeats: 0 }, () => {
+describe('PTY', { repeats: 500 }, () => {
   test('spawns and exits', async () => {
     const oldFds = getOpenFds();
     const message = 'hello from a pty';
@@ -562,6 +562,7 @@ async function getCgroupState(): Promise<CgroupState> {
   if (version === 'v2') {
     const sliceName = `${sliceBaseName}.scope`;
     const sliceDir = join(CG_ROOT, sliceName);
+    // cgroup v2 raw format: 0::/test-cgroup/test-cgroup-nested
     const cgroupRaw = (await exec(`cat /proc/self/cgroup`)).stdout.trim();
     const cgroupPath = cgroupRaw.split(':').pop() || '';
     const originalCgroup = join(CG_ROOT, cgroupPath.replace(/^\//, ''));
@@ -574,12 +575,13 @@ async function getCgroupState(): Promise<CgroupState> {
       moved: false,
     };
   } else {
-    // Determine available subsystems to manage (common ones)
+    // Determine available subsystems to manage (common ones like cpu, memory)
     const availableSubsystems = readdirSync(CG_ROOT);
     const v1Subsystems = ['cpu', 'memory'].filter((sub) =>
       availableSubsystems.includes(sub),
     );
     let originalCgroup = '/';
+    // cgroup v1 raw format: 0:cpu:/user.slice/user-1000.slice/session-c1.scope
     const cgroupRaw = (await exec(`cat /proc/self/cgroup`)).stdout.trim();
     const memoryLine = cgroupRaw
       .split('\n')
@@ -634,7 +636,6 @@ async function cgroupInit(cgroupState: CgroupState) {
 async function cgroupCleanup(cgroupState: CgroupState) {
   if (cgroupState.version === 'v2') {
     // remove the current process from the test slice and return it to its original cgroup
-    // so it can be deleted
     if (cgroupState.moved && cgroupState.originalCgroup) {
       await exec(
         `echo ${process.pid} | sudo tee ${cgroupState.originalCgroup}/cgroup.procs`,
