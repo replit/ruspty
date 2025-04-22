@@ -42,7 +42,7 @@ jobs:
         if: matrix.settings.host == 'ubuntu-24.04'
         run: |
           apt-get update
-          apt-get install -y curl build-essential
+          apt-get install -y curl build-essential sudo
       - name: Setup node
         uses: actions/setup-node@v4
         with:
