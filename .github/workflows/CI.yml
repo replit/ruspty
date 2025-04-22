@@ -21,30 +21,32 @@ permissions:
   pull_request: null
 
 jobs:
-  build-test:
+  build:
     strategy:
       fail-fast: false
       matrix:
         settings:
           - host: macos-14-large
             target: x86_64-apple-darwin
+            description: "macOS 14"
           - host: macos-latest
             target: aarch64-apple-darwin
+            description: "macOS latest"
           - host: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
             container: ubuntu:20.04
-    name: Build and test on ${{ matrix.settings.target }} (${{ matrix.settings.description }})
+            description: "Ubuntu Container(20.04)"
+    name: Build ${{ matrix.settings.target }} on (${{ matrix.settings.description }})
     runs-on: ${{ matrix.settings.host }}
-    container: 
+    container:
       image: ${{ matrix.settings.host == 'ubuntu-24.04' && matrix.settings.container || '' }}
-      options: --privileged
     steps:
       - uses: actions/checkout@v4
       - name: Install container dependencies
         if: matrix.settings.host == 'ubuntu-24.04'
         run: |
           apt-get update
-          apt-get install -y curl build-essential sudo cgroup-tools coreutils
+          apt-get install -y curl build-essential
       - name: Setup node
         uses: actions/setup-node@v4
         with:
@@ -87,8 +89,6 @@ jobs:
             fi
           fi
         shell: bash
-      - name: Test bindings
-        run: npm run test:ci
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -96,13 +96,59 @@ jobs:
           path: ${{ env.APP_NAME }}.*.node
           if-no-files-found: error
 
+  test:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        settings:
+          - host: macos-14-large
+            target: x86_64-apple-darwin
+            description: "macOS 14"
+          - host: macos-latest
+            target: aarch64-apple-darwin
+            description: "macOS latest"
+          - host: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            container: ubuntu:20.04
+            description: "Ubuntu Container(20.04)"
+          - host: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            container: ubuntu:24.04
+            description: "Ubuntu Container(24.04)"
+    name: Test on ${{ matrix.settings.target }} (${{ matrix.settings.description }})
+    runs-on: ${{ matrix.settings.host }}
+    container: 
+      image: ${{ matrix.settings.host == 'ubuntu-24.04' && matrix.settings.container || '' }}
+      options: --privileged
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install container dependencies
+        if: matrix.settings.host == 'ubuntu-24.04'
+        run: |
+          apt-get update
+          apt-get install -y curl build-essential sudo cgroup-tools coreutils
+      - name: Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install dependencies
+        run: npm ci
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          # Ubuntu 24.04 container will use the same artifact built on 20.04
+          name: ${{ matrix.settings.container == 'ubuntu:24.04' ? 'bindings-x86_64-unknown-linux-gnu' : format('bindings-{0}', matrix.settings.target) }}
+      - name: Test bindings
+        run: npm run test:ci
+
   publish:
     name: Publish
     runs-on: ubuntu-24.04
     container: ubuntu:20.04
     if: github.ref == 'refs/heads/main'
     needs:
-      - build-test
+      - test
     steps:
       - uses: actions/checkout@v4
       - name: Setup node
