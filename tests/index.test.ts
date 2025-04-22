@@ -186,7 +186,7 @@ describe('PTY', { repeats: 0 }, () => {
         console.log('reading from pty', data.toString());
         buffer += data.toString();
 
-        if (state === 'expectPrompt' && buffer.endsWith('$ ')) {
+        if (state === 'expectPrompt' && (buffer.endsWith('$ ') || buffer.endsWith('# '))) {
           writeStream.write("stty size; echo 'done1'\n");
           state = 'expectDone1';
           return;
