@@ -535,56 +535,134 @@ describe('PTY', { repeats: 500 }, () => {
 });
 
 type CgroupState = {
-  sliceDir: string;
-  originalCgroup: string;
-  sliceName: string;
+  version: 'v1' | 'v2';
+  sliceDir: string; // For v2: Full path to the slice dir. For v1: Base name for the group (e.g., "ruspty-xyz").
+  originalCgroup?: string; // For v2: Full path to original cgroup dir. For v1: Path within each hierarchy (e.g., "/user.slice").
+  sliceName: string; // For v2: the slice file name. For v1: Base name for the group (same as sliceDir).
   moved: boolean;
+  v1Subsystems?: string[]; // Only for v1: List of subsystems to manage (e.g., ['cpu', 'memory']).
 };
 
+async function detectCgroupVersion(): Promise<'v1' | 'v2'> {
+  try {
+    // Check for the unified hierarchy mount, characteristic of v2
+    await exec('mountpoint -q /sys/fs/cgroup/unified');
+    return 'v2';
+  } catch (e) {
+    return 'v1';
+  }
+}
+
 async function getCgroupState(): Promise<CgroupState> {
+  const version = await detectCgroupVersion();
   const CG_ROOT = '/sys/fs/cgroup';
-  // unique slice name to avoid conflicts with other test runs
-  const sliceName = `ruspty-${Math.random().toString(36).substring(2, 15)}.scope`;
-  const sliceDir = join(CG_ROOT, sliceName);
+  const sliceBaseName = `ruspty-${Math.random().toString(36).substring(2, 15)}`;
 
-  // Get the current process's cgroup path to restore it later
-  const cgroupRaw = (await exec(`cat /proc/self/cgroup`)).stdout.trim();
-  // Extract just the path portion from the cgroup format (e.g., "0::/user.slice/...")
-  const cgroupPath = cgroupRaw.split(':').pop() || '';
-  // Construct the full filesystem path to the original cgroup
-  const originalCgroup = join(CG_ROOT, cgroupPath.replace(/^\//, ''));
+  if (version === 'v2') {
+    const sliceName = `${sliceBaseName}.scope`;
+    const sliceDir = join(CG_ROOT, sliceName);
+    const cgroupRaw = (await exec(`cat /proc/self/cgroup`)).stdout.trim();
+    const cgroupPath = cgroupRaw.split(':').pop() || '';
+    const originalCgroup = join(CG_ROOT, cgroupPath.replace(/^\//, ''));
 
-  return {
-    sliceDir,
-    originalCgroup,
-    sliceName,
-    moved: false,
-  };
+    return {
+      version,
+      sliceDir,
+      originalCgroup,
+      sliceName,
+      moved: false,
+    };
+  } else {
+    // Determine available subsystems to manage (common ones)
+    const availableSubsystems = readdirSync(CG_ROOT);
+    const v1Subsystems = ['cpu', 'memory', 'pids'].filter(sub => availableSubsystems.includes(sub));
+    // Find the process's current cgroup path within *one* hierarchy (e.g., memory)
+    // This is imperfect, as a process can be in different groups in different hierarchies,
+    // but usually sufficient for restoration.
+    let originalCgroup = '/'; // Default to root
+    try {
+        const cgroupRaw = (await exec(`cat /proc/self/cgroup`)).stdout.trim();
+        const memoryLine = cgroupRaw.split('\n').find(line => line.includes(':memory:'));
+        if (memoryLine) {
+            originalCgroup = memoryLine.split(':').pop() || '/';
+        }
+    } catch (e) {
+        console.warn("Could not reliably determine original cgroup v1 path, defaulting to '/'", e)
+    }
+
+
+    return {
+      version,
+      sliceDir: sliceBaseName, // Use base name for v1 group name
+      originalCgroup, // Path relative to subsystem root
+      sliceName: sliceBaseName, // Base name
+      moved: false,
+      v1Subsystems,
+    };
+  }
 }
 
 async function cgroupInit(cgroupState: CgroupState) {
-  // create the slice - this is the cgroup that will be used for testing
-  await exec(`sudo mkdir -p ${cgroupState.sliceDir}`);
-  await exec(`sudo chown -R $(id -u):$(id -g) ${cgroupState.sliceDir}`);
+  if (cgroupState.version === 'v2') {
+    // create the slice - this is the cgroup that will be used for testing
+    await exec(`sudo mkdir -p ${cgroupState.sliceDir}`);
+    await exec(`sudo chown -R $(id -u):$(id -g) ${cgroupState.sliceDir}`);
 
-  // add the current process to the slice
-  // so the spawned pty inherits the slice - this is important because
-  // child processes inherit their parent's cgroup by default
-  await exec(
-    `echo ${process.pid} | sudo tee ${cgroupState.sliceDir}/cgroup.procs`,
-  );
-  cgroupState.moved = true;
+    // add the current process to the slice
+    // so the spawned pty inherits the slice - this is important because
+    // child processes inherit their parent's cgroup by default
+    await exec(
+      `echo ${process.pid} | sudo tee ${cgroupState.sliceDir}/cgroup.procs`,
+    );
+    cgroupState.moved = true;
+  } else {
+    // cgroup v1 logic
+    if (!cgroupState.v1Subsystems || cgroupState.v1Subsystems.length === 0) {
+        throw new Error("No cgroup v1 subsystems found or specified.");
+    }
+    const subsystems = cgroupState.v1Subsystems.join(',');
+    const groupPath = `/${cgroupState.sliceName}`;
+    await exec(`sudo cgcreate -g ${subsystems}:${groupPath}`);
+    // Move the current process into the new cgroup for all specified hierarchies
+    // This ensures the child process inherits it.
+    await exec(`sudo cgclassify -g ${subsystems}:${groupPath} ${process.pid}`);
+    cgroupState.moved = true;
+  }
 }
 
 async function cgroupCleanup(cgroupState: CgroupState) {
-  // remove the current process from the test slice and return it to its original cgroup
-  // so it can be deleted
-  if (cgroupState.moved) {
-    await exec(
-      `echo ${process.pid} | sudo tee ${cgroupState.originalCgroup}/cgroup.procs`,
-    );
+  if (cgroupState.version === 'v2') {
+    // remove the current process from the test slice and return it to its original cgroup
+    // so it can be deleted
+    if (cgroupState.moved && cgroupState.originalCgroup) {
+      await exec(
+        `echo ${process.pid} | sudo tee ${cgroupState.originalCgroup}/cgroup.procs`,
+      );
+    }
+    await exec(`sudo rmdir ${cgroupState.sliceDir}`);
+  } else {
+    if (!cgroupState.v1Subsystems || cgroupState.v1Subsystems.length === 0) {
+        // Nothing to clean up if no subsystems were managed
+        return;
+    }
+     const subsystems = cgroupState.v1Subsystems.join(',');
+     const groupPath = `/${cgroupState.sliceName}`;
+     // Move the current process back to its original group before deleting the test group.
+     // We determined originalCgroup path relative to subsystem root earlier.
+     // This assumes the original group still exists. Best effort restoration.
+     if (cgroupState.moved && cgroupState.originalCgroup) {
+         try {
+            // cgclassify might fail if the original group was removed or perms changed.
+             await exec(`sudo cgclassify -g ${subsystems}:${cgroupState.originalCgroup} ${process.pid}`);
+         } catch(e) {
+             console.warn(`Failed to move process ${process.pid} back to original cgroup v1 '${cgroupState.originalCgroup}'.`, e);
+             // Attempt to move to root as a fallback, might fail too.
+             try { await exec(`sudo cgclassify -g ${subsystems}:/ ${process.pid}`); } catch {}
+         }
+     }
+     
+     await exec(`sudo cgdelete -g ${subsystems}:${groupPath}`);
   }
-  await exec(`sudo rmdir ${cgroupState.sliceDir}`);
 }
 
 describe('cgroup opts', async () => {
