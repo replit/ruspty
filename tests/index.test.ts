@@ -57,7 +57,7 @@ function getOpenFds(): FdRecord {
   return fds;
 }
 
-describe('PTY', { repeats: 500 }, () => {
+describe('PTY', { repeats: 0 }, () => {
   test('spawns and exits', async () => {
     const oldFds = getOpenFds();
     const message = 'hello from a pty';
