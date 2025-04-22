@@ -138,7 +138,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           # Ubuntu 24.04 container will use the same artifact built on 20.04
-          name: ${{ matrix.settings.container == 'ubuntu:24.04' ? 'bindings-x86_64-unknown-linux-gnu' : format('bindings-{0}', matrix.settings.target) }}
+          name: ${{ matrix.settings.container == 'ubuntu:24.04' ? 'bindings-x86_64-unknown-linux-gnu' : 'bindings-' + matrix.settings.target }}
       - name: Test bindings
         run: npm run test:ci
 
