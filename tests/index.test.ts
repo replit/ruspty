@@ -161,7 +161,7 @@ describe('PTY', { repeats: 0 }, () => {
     expect(getOpenFds()).toStrictEqual(oldFds);
   });
 
-  test.only('can be resized', async () => {
+  test('can be resized', async () => {
     const oldFds = getOpenFds();
     let buffer = '';
     let state: 'expectPrompt' | 'expectDone1' | 'expectDone2' | 'done' =
