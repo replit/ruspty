@@ -71,6 +71,7 @@ jobs:
           strip -x *.node
         shell: bash
       - name: Dump GLIBC symbols
+        if: matrix.settings.host == 'ubuntu-24.04'
         run: |
           objdump -T *.node | grep GLIBC | sed 's/.*GLIBC_\([.0-9]*\).*/\1/g' | sort -Vu > glibc_versions.txt
           
