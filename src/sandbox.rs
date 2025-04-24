@@ -86,7 +86,7 @@ struct SyscallTarget {
 
 /// Get the tracee's target path for the syscall that is about to be executed by the kernel.
 fn get_syscall_targets(pid: Pid) -> Result<Vec<SyscallTarget>> {
-  let regs = ptrace::getregs(pid).unwrap();
+  let regs = ptrace::getregs(pid).context("ptrace::getregs")?;
   if regs.rax != (-(Error::ENOSYS as i32)) as u64 {
     // This is a syscall-exit-stop, and we have already made the decision of allowing / denying the operation.
     return Ok(vec![]);
@@ -363,7 +363,7 @@ impl std::error::Error for SandboxError {
 
 /// Inspect the tracee's syscall that is about to be executed.
 fn handle_syscall(pid: Pid, options: &Options) -> Result<()> {
-  for target in get_syscall_targets(pid).context("get_taget_path")? {
+  for target in get_syscall_targets(pid).context("get_target_path")? {
     let path_str = match target.path.as_path().to_str() {
       Some(path_str) => path_str,
       None => {
