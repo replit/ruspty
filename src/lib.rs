@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::fs::File;
+use std::fs::{write, File};
 use std::io::ErrorKind;
 use std::io::{Error, Write};
 use std::os::fd::{AsRawFd, OwnedFd};
@@ -68,6 +68,7 @@ struct PtyOptions {
   pub dir: Option<String>,
   pub size: Option<Size>,
   pub cgroup_path: Option<String>,
+  pub apparmor_profile: Option<String>,
   pub interactive: Option<bool>,
   pub sandbox: Option<SandboxOptions>,
   #[napi(ts_type = "(err: null | Error, exitCode: number) => void")]
@@ -161,6 +162,14 @@ impl Pty {
       return Err(napi::Error::new(
         napi::Status::GenericFailure,
         "sandbox is only supported on Linux",
+      ));
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    if opts.apparmor_profile.is_some() {
+      return Err(napi::Error::new(
+        napi::Status::GenericFailure,
+        "apparmor is only supported on Linux",
       ));
     }
 
@@ -281,6 +290,15 @@ impl Pty {
           libc::c_uint::MAX,
           libc::CLOSE_RANGE_CLOEXEC as c_int,
         );
+
+        // Set the AppArmor profile.
+        #[cfg(target_os = "linux")]
+        if let Some(apparmor_profile) = &opts.apparmor_profile {
+          write(
+            "/proc/self/attr/apparmor/exec",
+            format!("exec {apparmor_profile}"),
+          )?;
+        }
 
         // set input modes
         let user_fd = OwnedFd::from_raw_fd(raw_user_fd);
