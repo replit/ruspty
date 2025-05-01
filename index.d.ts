@@ -31,6 +31,7 @@ export interface PtyOptions {
   dir?: string;
   size?: Size;
   cgroupPath?: string;
+  apparmorProfile?: string;
   interactive?: boolean;
   sandbox?: SandboxOptions;
   onExit: (err: null | Error, exitCode: number) => void;

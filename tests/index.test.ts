@@ -537,8 +537,8 @@ describe('PTY', { repeats: 500 }, () => {
   });
 });
 
-type CgroupState = 
-  | { 
+type CgroupState =
+  | {
       version: 'v1';
       sliceDir: string; // Full path for v1 group using primary subsystem (e.g., "/sys/fs/cgroup/cpu/ruspty-xyz")
       originalCgroup?: string; // Path within each hierarchy (e.g., "/user.slice")
@@ -605,7 +605,7 @@ async function getCgroupState(): Promise<CgroupState> {
 
     return {
       version,
-      sliceDir: `/sys/fs/cgroup/${v1Subsystems[0]}/${sliceBaseName}`, 
+      sliceDir: `/sys/fs/cgroup/${v1Subsystems[0]}/${sliceBaseName}`,
       originalCgroup, // Path relative to subsystem root
       sliceName: sliceBaseName, // Base name
       moved: false,

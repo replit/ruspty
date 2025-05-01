@@ -294,10 +294,11 @@ impl Pty {
         // Set the AppArmor profile.
         #[cfg(target_os = "linux")]
         if let Some(apparmor_profile) = &opts.apparmor_profile {
-          write(
+          // TODO: Make this fail once we're sure we're never going back.
+          let _ = write(
             "/proc/self/attr/apparmor/exec",
             format!("exec {apparmor_profile}"),
-          )?;
+          );
         }
 
         // set input modes
