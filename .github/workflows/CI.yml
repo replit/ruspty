@@ -107,13 +107,9 @@ jobs:
             description: "macOS latest"
           - host: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
-            container: ubuntu:24.04
             description: "Ubuntu Container(24.04)"
     name: Test on ${{ matrix.settings.target }} (${{ matrix.settings.description }})
     runs-on: ${{ matrix.settings.host }}
-    container: 
-      image: ${{ matrix.settings.host == 'ubuntu-24.04' && matrix.settings.container || '' }}
-      options: --privileged
     steps:
       - uses: actions/checkout@v4
       - name: Install container dependencies
