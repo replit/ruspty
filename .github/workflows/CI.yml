@@ -42,8 +42,8 @@ jobs:
       - name: Install container dependencies
         if: matrix.settings.host == 'ubuntu-24.04'
         run: |
-          apt-get update
-          apt-get install -y curl build-essential
+          sudo apt-get update
+          sudo apt-get install -y curl build-essential
       - name: Setup node
         uses: actions/setup-node@v4
         with:
@@ -119,8 +119,8 @@ jobs:
       - name: Install container dependencies
         if: matrix.settings.host == 'ubuntu-24.04'
         run: |
-          apt-get update
-          apt-get install -y curl build-essential sudo cgroup-tools coreutils
+          sudo apt-get update
+          sudo apt-get install -y curl build-essential sudo cgroup-tools coreutils
       - name: Setup node
         uses: actions/setup-node@v4
         with:
