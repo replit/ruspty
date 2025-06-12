@@ -120,7 +120,7 @@ jobs:
         if: matrix.settings.host == 'ubuntu-24.04'
         run: |
           sudo apt-get update
-          sudo apt-get install -y curl build-essential sudo cgroup-tools coreutils
+          sudo apt-get install -y curl build-essential cgroup-tools coreutils
       - name: Setup node
         uses: actions/setup-node@v4
         with:
