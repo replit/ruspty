@@ -16,6 +16,8 @@ export interface SandboxRule {
   operation: Operation;
   /** The list of prefixes that are matched by this rule. */
   prefixes: Array<string>;
+  /** The list of prefixes that are excluded from this rule. */
+  excludePrefixes?: Array<string>;
   /** The message to be shown if this rule triggers. */
   message: string;
 }

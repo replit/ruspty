@@ -49,6 +49,8 @@ pub struct SandboxRule {
   pub operation: Operation,
   /// The list of prefixes that are matched by this rule.
   pub prefixes: Vec<String>,
+  /// The list of prefixes that are excluded from this rule.
+  pub exclude_prefixes: Option<Vec<String>>,
   /// The message to be shown if this rule triggers.
   pub message: String,
 }
@@ -251,6 +253,7 @@ impl Pty {
                     Operation::Delete => sandbox::Operation::Delete,
                   },
                   prefixes: rule.prefixes.clone(),
+                  exclude_prefixes: rule.exclude_prefixes.clone(),
                   message: rule.message.clone(),
                 })
                 .collect(),
