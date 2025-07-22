@@ -1,7 +1,7 @@
 import { Pty, getCloseOnExec, setCloseOnExec, Operation } from '../wrapper';
 import { type Writable } from 'stream';
 import { readdirSync, readlinkSync } from 'fs';
-import { mkdir, rm, mkdtemp } from 'node:fs/promises';
+import { mkdir, rm, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -846,6 +846,52 @@ describe('sandbox opts', { repeats: 10 }, async () => {
     expect(buffer.trimEnd()).toBe(
       `Tried to delete a forbidden path: ${gitPath}`,
     );
+    expect(getOpenFds()).toStrictEqual(oldFds);
+  });
+
+  testSkipOnDarwin('can exclude prefixes', async () => {
+    if (cgroupState === null) {
+      return;
+    }
+
+    const oldFds = getOpenFds();
+    let buffer = '';
+    const onExit = vi.fn();
+
+    const gitPath = `${tempDirPath}/.git`;
+    await mkdir(gitPath);
+    const indexLockPath = `${gitPath}/index.lock`;
+    await writeFile(indexLockPath, 'locked');
+    const pty = new Pty({
+      command: '/bin/sh',
+      args: ['-c', `/bin/sh -c "rm -f ${indexLockPath}"`],
+      cgroupPath: cgroupState.sliceDir,
+      sandbox: {
+        rules: [
+          {
+            operation: Operation.Delete,
+            prefixes: [gitPath],
+            excludePrefixes: [indexLockPath],
+            message: 'Tried to delete a forbidden path',
+          },
+        ],
+      },
+      envs: process.env.PATH
+        ? {
+            PATH: process.env.PATH,
+          }
+        : {},
+      onExit,
+    });
+
+    const readStream = pty.read;
+    readStream.on('data', (data) => {
+      buffer = data.toString();
+    });
+
+    await vi.waitFor(() => expect(onExit).toHaveBeenCalledTimes(1));
+    expect(onExit).toHaveBeenCalledWith(null, 0);
+    expect(buffer.trimEnd()).toBe('');
     expect(getOpenFds()).toStrictEqual(oldFds);
   });
 });

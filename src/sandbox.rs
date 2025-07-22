@@ -374,19 +374,35 @@ fn handle_syscall(pid: Pid, options: &Options) -> Result<()> {
       if target.operation != rule.operation {
         continue;
       }
-      for prefix in &rule.prefixes {
-        if !path_str.starts_with(prefix) {
-          continue;
-        }
-        return Err(
-          SandboxError {
-            sysno: target.sysno,
-            message: rule.message.clone(),
-            path: target.path,
-          }
-          .into(),
-        );
+
+      // Check if path matches any prefix
+      let matches_prefix = rule
+        .prefixes
+        .iter()
+        .any(|prefix| path_str.starts_with(prefix));
+      if !matches_prefix {
+        continue;
       }
+
+      // Path matches operation and a prefix, now check excludes
+      if let Some(exclude_prefixes) = &rule.exclude_prefixes {
+        let matches_exclude = exclude_prefixes
+          .iter()
+          .any(|exclude| path_str.starts_with(exclude));
+        if matches_exclude {
+          continue; // This rule doesn't apply due to exclude
+        }
+      }
+
+      // Rule applies - return error
+      return Err(
+        SandboxError {
+          sysno: target.sysno,
+          message: rule.message.clone(),
+          path: target.path,
+        }
+        .into(),
+      );
     }
   }
 
@@ -621,6 +637,8 @@ pub struct Rule {
   pub operation: Operation,
   /// The list of prefixes that are matched by this rule.
   pub prefixes: Vec<String>,
+  /// The list of prefixes that are excluded from this rule.
+  pub exclude_prefixes: Option<Vec<String>>,
   /// The message to be shown if this rule triggers.
   pub message: String,
 }
@@ -739,11 +757,13 @@ mod tests {
                   "/home/runner/workspace/replit.nix".to_string(),
                   "/home/runner/workspace/.git/refs/replit/agent-ledger".to_string(),
                 ],
+                exclude_prefixes: None,
                 message: "Tried to modify a forbidden path".to_string(),
               },
               Rule {
                 operation: Operation::Delete,
                 prefixes: vec!["/home/runner/workspace/.git/".to_string()],
+                exclude_prefixes: Some(vec!["/home/runner/workspace/.git/index.lock".to_string()]),
                 message: "Tried to delete a forbidden path".to_string(),
               },
             ],
@@ -847,5 +867,21 @@ mod tests {
     let (exit_status, _, _) =
       test_install_sandbox(exec_hook, tmp_dir.path()).expect("test_install_sandbox");
     assert_eq!(exit_status, 254);
+  }
+
+  #[test]
+  fn it_allows_modifying_dot_git_index_lock() {
+    fn exec_hook() -> ! {
+      std::fs::write("/home/runner/workspace/.git/index.lock", "yo")
+        .expect("write .git/index.lock");
+      unsafe { libc::_exit(0) };
+    }
+
+    let tmp_dir =
+      TempDir::with_prefix("pid2sandbox-").expect("Failed to create temporary directory");
+    // Cargo captures the error message, but we only care about the exit code.
+    let (exit_status, _, _) =
+      test_install_sandbox(exec_hook, tmp_dir.path()).expect("test_install_sandbox");
+    assert_eq!(exit_status, 0);
   }
 }
