@@ -266,23 +266,19 @@ fn get_syscall_targets(pid: Pid) -> Result<Vec<SyscallTarget>> {
       }])
     }
     Some(sysno @ Sysno::symlinkat) => {
-      let mut oldpath = match regs.rdi {
-        AT_FDCWD64 | AT_FDCWD => get_cwd(pid).context("symlinkat: get old cwd")?,
-        dirfd => get_fd_path(pid, dirfd as i32)
-          .with_context(|| format!("symlinkat: get old fd path {:x}", regs.rdi))?,
-      };
-      oldpath.push(read_path(pid, regs.rsi as u64).context("symlinkat: get old path")?);
-      let mut newpath = match regs.rdx {
+      let cwd = get_cwd(pid).context("symlinkat: get cwd")?;
+      let oldname = cwd.join(read_path(pid, regs.rdi as u64).context("symlinkat: read oldname")?);
+      let mut newname = match regs.rsi {
         AT_FDCWD64 | AT_FDCWD => get_cwd(pid).context("symlinkat: get new cwd")?,
         dirfd => get_fd_path(pid, dirfd as i32)
-          .with_context(|| format!("symlinkat: get new fd path {:x}", regs.rdi))?,
+          .with_context(|| format!("symlinkat: get newfd path {:x}", regs.rsi))?,
       };
-      newpath.push(read_path(pid, regs.r10 as u64).context("symlinkat: get new path")?);
-      debug!(pid:? = pid, oldpath:?= oldpath, newpath:? = newpath, sysno:?=sysno; "syscall");
+      newname.push(read_path(pid, regs.rdx as u64).context("symlinkat: get newname")?);
+      debug!(pid:?=pid, oldname:?=oldname, newname:?=newname, sysno:?=sysno; "syscall");
       Ok(vec![SyscallTarget {
         operation: Operation::Modify,
         sysno,
-        path: newpath,
+        path: newname,
       }])
     }
     Some(sysno @ Sysno::renameat2) => {
@@ -478,7 +474,9 @@ fn run_parent(main_pid: Pid, options: &Options) -> Result<i32> {
       Ok(WaitStatus::Stopped(pid, sig_num)) => match sig_num {
         signum @ Signal::SIGTRAP => {
           debug!(signal:?=signum, pid:? = pid; "signal");
-          match handle_syscall(pid, options).with_context(|| format!("handle_sigtrap pid={pid}")) {
+          match handle_syscall(pid, options)
+            .with_context(|| format!("handle_sigtrap pid={pid}, signum={signum}"))
+          {
             Ok(()) => match ptrace::syscall(pid, None) {
               Ok(_) => {}
               Err(Error::ESRCH) => {}
