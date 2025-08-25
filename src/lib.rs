@@ -24,7 +24,7 @@ use nix::sys::termios::{self, SetArg};
 #[macro_use]
 extern crate napi_derive;
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 mod sandbox;
 
 #[napi]
@@ -242,6 +242,7 @@ impl Pty {
 
           // also set the sandbox if specified. It's important for it to be in a cgroup so that we don't
           // accidentally leak processes if something went wrong.
+          #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
           if let Some(sandbox_opts) = &opts.sandbox {
             if let Err(err) = sandbox::install_sandbox(sandbox::Options {
               rules: sandbox_opts
@@ -263,6 +264,12 @@ impl Pty {
                 format!("install_sandbox: {:#?}", err),
               ));
             }
+          }
+          
+          // On ARM64 and other architectures, sandbox is not supported yet
+          #[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+          if let Some(_sandbox_opts) = &opts.sandbox {
+            eprintln!("Warning: Sandbox is not supported on ARM64 Linux. Continuing without sandbox.");
           }
         }
 
