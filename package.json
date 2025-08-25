@@ -1,16 +1,16 @@
 {
-  "name": "@replit/ruspty",
-  "version": "3.5.2",
+  "name": "@akaoio/ruspty",
+  "version": "3.5.3",
   "main": "dist/wrapper.js",
   "types": "dist/wrapper.d.ts",
-  "author": "Szymon Kaliski <hi@szymonkaliski.com>",
+  "author": "Szymon Kaliski <hi@szymonkaliski.com> (original), akaoio (ARM64 support)",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/replit/ruspty.git"
+    "url": "git+https://github.com/akaoio/ruspty.git"
   },
-  "homepage": "https://github.com/replit/ruspty#readme",
+  "homepage": "https://github.com/akaoio/ruspty#readme",
   "bugs": {
-    "url": "https://github.com/replit/ruspty/issues"
+    "url": "https://github.com/akaoio/ruspty/issues"
   },
   "napi": {
     "name": "ruspty",
@@ -47,5 +47,11 @@
     "version": "napi version",
     "release": "npm publish --access public",
     "format": "npx prettier *.{js,ts} tests/*.ts --write"
+  },
+  "optionalDependencies": {
+    "@akaoio/ruspty-darwin-x64": "3.5.3",
+    "@akaoio/ruspty-darwin-arm64": "3.5.3",
+    "@akaoio/ruspty-linux-x64-gnu": "3.5.3",
+    "@akaoio/ruspty-linux-arm64-gnu": "3.5.3"
   }
 }

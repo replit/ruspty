@@ -227,7 +227,7 @@ switch (platform) {
             if (localFileExisted) {
               nativeBinding = require('./ruspty.linux-arm64-gnu.node');
             } else {
-              nativeBinding = require('@replit/ruspty-linux-arm64-gnu');
+              nativeBinding = require('@akaoio/ruspty-linux-arm64-gnu');
             }
           } catch (e) {
             loadError = e;
