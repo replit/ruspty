@@ -1,6 +1,6 @@
 {
   "name": "@akaoio/ruspty",
-  "version": "3.5.6",
+  "version": "3.5.7",
   "main": "dist/wrapper.js",
   "types": "dist/wrapper.d.ts",
   "author": "Szymon Kaliski <hi@szymonkaliski.com> (original), akaoio (ARM64 support)",
