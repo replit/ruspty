@@ -38,7 +38,7 @@
   "scripts": {
     "artifacts": "napi artifacts",
     "build": "napi build --platform --release && npm run build:wrapper && npm run format",
-    "build:wrapper": "tsup",
+    "build:wrapper": "tsup && cp index.js dist/",
     "prepublishOnly": "napi prepublish -t npm",
     "test": "vitest run",
     "test:ci": "vitest --reporter=verbose --reporter=github-actions run",
@@ -49,9 +49,9 @@
     "format": "npx prettier *.{js,ts} tests/*.ts --write"
   },
   "optionalDependencies": {
-    "@akaoio/ruspty-darwin-x64": "3.5.6",
-    "@akaoio/ruspty-darwin-arm64": "3.5.6",
-    "@akaoio/ruspty-linux-x64-gnu": "3.5.6",
-    "@akaoio/ruspty-linux-arm64-gnu": "3.5.6"
+    "@akaoio/ruspty-darwin-x64": "3.5.7",
+    "@akaoio/ruspty-darwin-arm64": "3.5.7",
+    "@akaoio/ruspty-linux-x64-gnu": "3.5.7",
+    "@akaoio/ruspty-linux-arm64-gnu": "3.5.7"
   }
 }
