@@ -49,9 +49,9 @@
     "format": "npx prettier *.{js,ts} tests/*.ts --write"
   },
   "optionalDependencies": {
-    "@akaoio/ruspty-darwin-x64": "3.5.3",
-    "@akaoio/ruspty-darwin-arm64": "3.5.3",
-    "@akaoio/ruspty-linux-x64-gnu": "3.5.3",
-    "@akaoio/ruspty-linux-arm64-gnu": "3.5.3"
+    "@akaoio/ruspty-darwin-x64": "3.5.4",
+    "@akaoio/ruspty-darwin-arm64": "3.5.4",
+    "@akaoio/ruspty-linux-x64-gnu": "3.5.4",
+    "@akaoio/ruspty-linux-arm64-gnu": "3.5.4"
   }
 }
