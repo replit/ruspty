@@ -15,24 +15,24 @@ console.log('Available exports:', Object.keys(nativeBinding));
 
 // Test creating a PTY
 try {
-    const pty = new nativeBinding.Pty({
-        command: 'echo',
-        args: ['Hello ARM64!'],
-        envs: process.env,
-        size: { rows: 24, cols: 80 },
-        onExit: (err, exitCode) => {
-            console.log('PTY exited with code:', exitCode);
-        }
-    });
-    
-    console.log('✅ PTY created successfully!');
-    console.log('PID:', pty.pid);
-    
-    // Try to take FD
-    const fd = pty.takeFd();
-    console.log('File descriptor:', fd);
-    
-    console.log('\n🎉 ARM64 native binary is working!');
+  const pty = new nativeBinding.Pty({
+    command: 'echo',
+    args: ['Hello ARM64!'],
+    envs: process.env,
+    size: { rows: 24, cols: 80 },
+    onExit: (err, exitCode) => {
+      console.log('PTY exited with code:', exitCode);
+    },
+  });
+
+  console.log('✅ PTY created successfully!');
+  console.log('PID:', pty.pid);
+
+  // Try to take FD
+  const fd = pty.takeFd();
+  console.log('File descriptor:', fd);
+
+  console.log('\n🎉 ARM64 native binary is working!');
 } catch (err) {
-    console.error('❌ Failed to create PTY:', err.message);
+  console.error('❌ Failed to create PTY:', err.message);
 }
