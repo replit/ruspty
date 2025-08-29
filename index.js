@@ -42,7 +42,7 @@ switch (platform) {
           if (localFileExisted) {
             nativeBinding = require('./ruspty.android-arm64.node');
           } else {
-            nativeBinding = require('@replit/ruspty-android-arm64');
+            nativeBinding = require('@akaoio/ruspty-android-arm64');
           }
         } catch (e) {
           loadError = e;
@@ -56,7 +56,7 @@ switch (platform) {
           if (localFileExisted) {
             nativeBinding = require('./ruspty.android-arm-eabi.node');
           } else {
-            nativeBinding = require('@replit/ruspty-android-arm-eabi');
+            nativeBinding = require('@akaoio/ruspty-android-arm-eabi');
           }
         } catch (e) {
           loadError = e;
@@ -76,7 +76,7 @@ switch (platform) {
           if (localFileExisted) {
             nativeBinding = require('./ruspty.win32-x64-msvc.node');
           } else {
-            nativeBinding = require('@replit/ruspty-win32-x64-msvc');
+            nativeBinding = require('@akaoio/ruspty-win32-x64-msvc');
           }
         } catch (e) {
           loadError = e;
@@ -90,7 +90,7 @@ switch (platform) {
           if (localFileExisted) {
             nativeBinding = require('./ruspty.win32-ia32-msvc.node');
           } else {
-            nativeBinding = require('@replit/ruspty-win32-ia32-msvc');
+            nativeBinding = require('@akaoio/ruspty-win32-ia32-msvc');
           }
         } catch (e) {
           loadError = e;
@@ -104,7 +104,7 @@ switch (platform) {
           if (localFileExisted) {
             nativeBinding = require('./ruspty.win32-arm64-msvc.node');
           } else {
-            nativeBinding = require('@replit/ruspty-win32-arm64-msvc');
+            nativeBinding = require('@akaoio/ruspty-win32-arm64-msvc');
           }
         } catch (e) {
           loadError = e;
@@ -122,7 +122,7 @@ switch (platform) {
       if (localFileExisted) {
         nativeBinding = require('./ruspty.darwin-universal.node');
       } else {
-        nativeBinding = require('@replit/ruspty-darwin-universal');
+        nativeBinding = require('@akaoio/ruspty-darwin-universal');
       }
       break;
     } catch {}
@@ -135,7 +135,7 @@ switch (platform) {
           if (localFileExisted) {
             nativeBinding = require('./ruspty.darwin-x64.node');
           } else {
-            nativeBinding = require('@replit/ruspty-darwin-x64');
+            nativeBinding = require('@akaoio/ruspty-darwin-x64');
           }
         } catch (e) {
           loadError = e;
@@ -149,7 +149,7 @@ switch (platform) {
           if (localFileExisted) {
             nativeBinding = require('./ruspty.darwin-arm64.node');
           } else {
-            nativeBinding = require('@replit/ruspty-darwin-arm64');
+            nativeBinding = require('@akaoio/ruspty-darwin-arm64');
           }
         } catch (e) {
           loadError = e;
@@ -168,7 +168,7 @@ switch (platform) {
       if (localFileExisted) {
         nativeBinding = require('./ruspty.freebsd-x64.node');
       } else {
-        nativeBinding = require('@replit/ruspty-freebsd-x64');
+        nativeBinding = require('@akaoio/ruspty-freebsd-x64');
       }
     } catch (e) {
       loadError = e;
@@ -185,7 +185,7 @@ switch (platform) {
             if (localFileExisted) {
               nativeBinding = require('./ruspty.linux-x64-musl.node');
             } else {
-              nativeBinding = require('@replit/ruspty-linux-x64-musl');
+              nativeBinding = require('@akaoio/ruspty-linux-x64-musl');
             }
           } catch (e) {
             loadError = e;
@@ -198,7 +198,7 @@ switch (platform) {
             if (localFileExisted) {
               nativeBinding = require('./ruspty.linux-x64-gnu.node');
             } else {
-              nativeBinding = require('@replit/ruspty-linux-x64-gnu');
+              nativeBinding = require('@akaoio/ruspty-linux-x64-gnu');
             }
           } catch (e) {
             loadError = e;
@@ -214,7 +214,7 @@ switch (platform) {
             if (localFileExisted) {
               nativeBinding = require('./ruspty.linux-arm64-musl.node');
             } else {
-              nativeBinding = require('@replit/ruspty-linux-arm64-musl');
+              nativeBinding = require('@akaoio/ruspty-linux-arm64-musl');
             }
           } catch (e) {
             loadError = e;
@@ -227,7 +227,7 @@ switch (platform) {
             if (localFileExisted) {
               nativeBinding = require('./ruspty.linux-arm64-gnu.node');
             } else {
-              nativeBinding = require('@replit/ruspty-linux-arm64-gnu');
+              nativeBinding = require('@akaoio/ruspty-linux-arm64-gnu');
             }
           } catch (e) {
             loadError = e;
@@ -243,7 +243,7 @@ switch (platform) {
             if (localFileExisted) {
               nativeBinding = require('./ruspty.linux-arm-musleabihf.node');
             } else {
-              nativeBinding = require('@replit/ruspty-linux-arm-musleabihf');
+              nativeBinding = require('@akaoio/ruspty-linux-arm-musleabihf');
             }
           } catch (e) {
             loadError = e;
@@ -256,7 +256,7 @@ switch (platform) {
             if (localFileExisted) {
               nativeBinding = require('./ruspty.linux-arm-gnueabihf.node');
             } else {
-              nativeBinding = require('@replit/ruspty-linux-arm-gnueabihf');
+              nativeBinding = require('@akaoio/ruspty-linux-arm-gnueabihf');
             }
           } catch (e) {
             loadError = e;
@@ -272,7 +272,7 @@ switch (platform) {
             if (localFileExisted) {
               nativeBinding = require('./ruspty.linux-riscv64-musl.node');
             } else {
-              nativeBinding = require('@replit/ruspty-linux-riscv64-musl');
+              nativeBinding = require('@akaoio/ruspty-linux-riscv64-musl');
             }
           } catch (e) {
             loadError = e;
@@ -285,7 +285,7 @@ switch (platform) {
             if (localFileExisted) {
               nativeBinding = require('./ruspty.linux-riscv64-gnu.node');
             } else {
-              nativeBinding = require('@replit/ruspty-linux-riscv64-gnu');
+              nativeBinding = require('@akaoio/ruspty-linux-riscv64-gnu');
             }
           } catch (e) {
             loadError = e;
@@ -300,7 +300,7 @@ switch (platform) {
           if (localFileExisted) {
             nativeBinding = require('./ruspty.linux-s390x-gnu.node');
           } else {
-            nativeBinding = require('@replit/ruspty-linux-s390x-gnu');
+            nativeBinding = require('@akaoio/ruspty-linux-s390x-gnu');
           }
         } catch (e) {
           loadError = e;

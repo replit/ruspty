@@ -21,5 +21,10 @@ export default defineConfig({
   dts: true,
   sourcemap: true,
   clean: true,
-  external: triples.map((triple) => `./ruspty.${triple}.node`),
+  external: [
+    ...triples.map((triple) => `./ruspty.${triple}.node`),
+    './index.js',  // Don't bundle index.js
+    './index'      // Also handle without extension
+  ],
+  noExternal: []  // Don't bundle anything by default
 });

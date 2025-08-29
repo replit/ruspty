@@ -1,16 +1,16 @@
 {
-  "name": "@replit/ruspty",
-  "version": "3.5.2",
+  "name": "@akaoio/ruspty",
+  "version": "3.5.8",
   "main": "dist/wrapper.js",
   "types": "dist/wrapper.d.ts",
-  "author": "Szymon Kaliski <hi@szymonkaliski.com>",
+  "author": "Szymon Kaliski <hi@szymonkaliski.com> (original), akaoio (ARM64 support)",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/replit/ruspty.git"
+    "url": "git+https://github.com/akaoio/ruspty.git"
   },
-  "homepage": "https://github.com/replit/ruspty#readme",
+  "homepage": "https://github.com/akaoio/ruspty#readme",
   "bugs": {
-    "url": "https://github.com/replit/ruspty/issues"
+    "url": "https://github.com/akaoio/ruspty/issues"
   },
   "napi": {
     "name": "ruspty",
@@ -19,7 +19,16 @@
       "additional": [
         "x86_64-apple-darwin",
         "aarch64-apple-darwin",
-        "x86_64-unknown-linux-gnu"
+        "x86_64-unknown-linux-gnu",
+        "aarch64-unknown-linux-gnu",
+        "armv7-unknown-linux-gnueabihf",
+        "i686-unknown-linux-gnu",
+        "x86_64-unknown-linux-musl",
+        "aarch64-unknown-linux-musl",
+        "x86_64-pc-windows-msvc",
+        "aarch64-pc-windows-msvc",
+        "i686-pc-windows-msvc",
+        "x86_64-unknown-freebsd"
       ]
     }
   },
@@ -37,7 +46,7 @@
   "scripts": {
     "artifacts": "napi artifacts",
     "build": "napi build --platform --release && npm run build:wrapper && npm run format",
-    "build:wrapper": "tsup",
+    "build:wrapper": "tsup && cp index.js dist/",
     "prepublishOnly": "napi prepublish -t npm",
     "test": "vitest run",
     "test:ci": "vitest --reporter=verbose --reporter=github-actions run",
@@ -46,5 +55,18 @@
     "version": "napi version",
     "release": "npm publish --access public",
     "format": "npx prettier *.{js,ts} tests/*.ts --write"
+  },
+  "optionalDependencies": {
+    "@akaoio/ruspty-win32-x64-msvc": "3.5.8",
+    "@akaoio/ruspty-win32-ia32-msvc": "3.5.8",
+    "@akaoio/ruspty-win32-arm64-msvc": "3.5.8",
+    "@akaoio/ruspty-darwin-x64": "3.5.8",
+    "@akaoio/ruspty-darwin-arm64": "3.5.8",
+    "@akaoio/ruspty-linux-x64-gnu": "3.5.8",
+    "@akaoio/ruspty-linux-arm64-gnu": "3.5.8",
+    "@akaoio/ruspty-linux-arm-gnueabihf": "3.5.8",
+    "@akaoio/ruspty-linux-x64-musl": "3.5.8",
+    "@akaoio/ruspty-linux-arm64-musl": "3.5.8",
+    "@akaoio/ruspty-freebsd-x64": "3.5.8"
   }
 }
