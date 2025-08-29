@@ -20,7 +20,15 @@
         "x86_64-apple-darwin",
         "aarch64-apple-darwin",
         "x86_64-unknown-linux-gnu",
-        "aarch64-unknown-linux-gnu"
+        "aarch64-unknown-linux-gnu",
+        "armv7-unknown-linux-gnueabihf",
+        "i686-unknown-linux-gnu",
+        "x86_64-unknown-linux-musl",
+        "aarch64-unknown-linux-musl",
+        "x86_64-pc-windows-msvc",
+        "aarch64-pc-windows-msvc",
+        "i686-pc-windows-msvc",
+        "x86_64-unknown-freebsd"
       ]
     }
   },
@@ -49,9 +57,16 @@
     "format": "npx prettier *.{js,ts} tests/*.ts --write"
   },
   "optionalDependencies": {
-    "@akaoio/ruspty-darwin-x64": "3.5.7",
-    "@akaoio/ruspty-darwin-arm64": "3.5.7",
-    "@akaoio/ruspty-linux-x64-gnu": "3.5.7",
-    "@akaoio/ruspty-linux-arm64-gnu": "3.5.7"
+    "@akaoio/ruspty-win32-x64-msvc": "3.5.8",
+    "@akaoio/ruspty-win32-ia32-msvc": "3.5.8",
+    "@akaoio/ruspty-win32-arm64-msvc": "3.5.8",
+    "@akaoio/ruspty-darwin-x64": "3.5.8",
+    "@akaoio/ruspty-darwin-arm64": "3.5.8",
+    "@akaoio/ruspty-linux-x64-gnu": "3.5.8",
+    "@akaoio/ruspty-linux-arm64-gnu": "3.5.8",
+    "@akaoio/ruspty-linux-arm-gnueabihf": "3.5.8",
+    "@akaoio/ruspty-linux-x64-musl": "3.5.8",
+    "@akaoio/ruspty-linux-arm64-musl": "3.5.8",
+    "@akaoio/ruspty-freebsd-x64": "3.5.8"
   }
 }
