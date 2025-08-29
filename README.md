@@ -39,3 +39,4 @@ Following ["Publish It" section from `napi-rs` docs](https://napi.rs/docs/introd
 3. Send that as a Pull Request to GitHub. Ensure that the commit message consisting **only** of `x.y.z` - this is how the CI decides to publish to `npm`!
 
 `NPM_TOKEN` is part of the repo secrets, generated [like this](https://httptoolkit.com/blog/automatic-npm-publish-gha/).
+# Cross-platform build trigger Fri Aug 29 03:27:55 PM +07 2025
