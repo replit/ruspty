@@ -86,7 +86,11 @@ struct SyscallTarget {
 
 /// Get the tracee's target path for the syscall that is about to be executed by the kernel.
 fn get_syscall_targets(pid: Pid) -> Result<Vec<SyscallTarget>> {
-  let regs = ptrace::getregs(pid).context("ptrace::getregs")?;
+  let regs = match ptrace::getregs(pid) {
+    Ok(regs) => regs,
+    Err(Error::ESRCH) => return Ok(vec![]), // process gone, no targets
+    Err(err) => return Err(err).context("ptrace::getregs"),
+  };
   if regs.rax != (-(Error::ENOSYS as i32)) as u64 {
     // This is a syscall-exit-stop, and we have already made the decision of allowing / denying the operation.
     return Ok(vec![]);
@@ -483,7 +487,16 @@ fn run_parent(main_pid: Pid, options: &Options) -> Result<i32> {
       return Err(err).context("ptrace::setoptions");
     }
   }
-  ptrace::syscall(main_pid, None).context("Failed continue process")?;
+  match ptrace::syscall(main_pid, None) {
+    Ok(_) => {}
+    Err(Error::ESRCH) => {
+      // The child process has already exited.
+      return Ok(0);
+    }
+    Err(err) => {
+      return Err(err).context("failed to continue process");
+    }
+  }
 
   loop {
     match wait() {
@@ -514,7 +527,7 @@ fn run_parent(main_pid: Pid, options: &Options) -> Result<i32> {
         }
         signum @ Signal::SIGSTOP => {
           debug!(signal:?=signum, pid:? = pid; "signal");
-          ptrace::setoptions(
+          match ptrace::setoptions(
             pid,
             ptrace::Options::PTRACE_O_TRACESYSGOOD
               | ptrace::Options::PTRACE_O_TRACEFORK
@@ -522,8 +535,13 @@ fn run_parent(main_pid: Pid, options: &Options) -> Result<i32> {
               | ptrace::Options::PTRACE_O_TRACECLONE
               | ptrace::Options::PTRACE_O_EXITKILL
               | ptrace::Options::PTRACE_O_TRACEEXIT,
-          )
-          .context("setoptions")?;
+          ) {
+            Ok(_) => {}
+            Err(Error::ESRCH) => {}
+            Err(err) => {
+              return Err(anyhow::Error::new(err).context("setoptions"));
+            }
+          }
           match ptrace::syscall(pid, None) {
             Ok(_) => {}
             Err(Error::ESRCH) => {}
