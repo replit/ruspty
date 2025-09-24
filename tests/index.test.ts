@@ -9,7 +9,6 @@ import {
   test,
   expect,
   beforeEach,
-  afterEach,
   vi,
   type Mock,
   assert,
@@ -65,7 +64,7 @@ describe('PTY', { repeats: 500 }, () => {
 
     const onExit = vi.fn();
     const pty = new Pty({
-      command: '/bin/echo',
+      command: 'echo',
       args: [message],
       onExit,
     });
@@ -87,7 +86,7 @@ describe('PTY', { repeats: 500 }, () => {
     const oldFds = getOpenFds();
     const onExit = vi.fn();
     const pty = new Pty({
-      command: '/bin/sh',
+      command: 'sh',
       args: ['-c', 'exit 17'],
       onExit,
     });
@@ -107,7 +106,7 @@ describe('PTY', { repeats: 500 }, () => {
     const onExit = vi.fn();
 
     const pty = new Pty({
-      command: '/bin/cat',
+      command: 'cat',
       onExit,
     });
 
@@ -142,7 +141,7 @@ describe('PTY', { repeats: 500 }, () => {
     const onExit = vi.fn();
 
     const pty = new Pty({
-      command: '/bin/cat',
+      command: 'cat',
       interactive: false,
       onExit,
     });
@@ -169,7 +168,7 @@ describe('PTY', { repeats: 500 }, () => {
     const onExit = vi.fn();
 
     const pty = new Pty({
-      command: '/bin/sh',
+      command: 'sh',
       size: { rows: 24, cols: 80 },
       onExit,
     });
@@ -222,7 +221,7 @@ describe('PTY', { repeats: 500 }, () => {
     const onExit = vi.fn();
 
     const pty = new Pty({
-      command: '/bin/pwd',
+      command: 'pwd',
       dir: cwd,
       onExit,
     });
@@ -245,7 +244,7 @@ describe('PTY', { repeats: 500 }, () => {
     const onExit = vi.fn();
 
     const pty = new Pty({
-      command: '/bin/sh',
+      command: 'sh',
       args: ['-c', 'echo $ENV_VARIABLE && exit'],
       envs: {
         ENV_VARIABLE: message,
@@ -267,7 +266,7 @@ describe('PTY', { repeats: 500 }, () => {
   test("resize after exit shouldn't throw", async () => {
     const onExit = vi.fn();
     const pty = new Pty({
-      command: '/bin/echo',
+      command: 'echo',
       args: ['hello'],
       onExit,
     });
@@ -284,7 +283,7 @@ describe('PTY', { repeats: 500 }, () => {
   test("resize after close shouldn't throw", async () => {
     const onExit = vi.fn();
     const pty = new Pty({
-      command: '/bin/sh',
+      command: 'sh',
       onExit,
     });
 
@@ -309,7 +308,7 @@ describe('PTY', { repeats: 500 }, () => {
     const onExit = vi.fn();
 
     const pty = new Pty({
-      command: '/bin/sh',
+      command: 'sh',
       args: ['-c', `seq 0 ${n}`],
       onExit,
     });
@@ -340,7 +339,7 @@ describe('PTY', { repeats: 500 }, () => {
     const onExit = vi.fn();
 
     const pty = new Pty({
-      command: '/bin/echo',
+      command: 'echo',
       args: ['-n', payload],
       onExit,
     });
@@ -355,6 +354,27 @@ describe('PTY', { repeats: 500 }, () => {
     expect(buffer.toString().length).toBe(payload.length);
   });
 
+  test('doesnt miss lots of lines from bash', async () => {
+    const payload = Array.from({ length: 4096 * 2 }, (_, i) => i).join('\n');
+    let buffer = Buffer.from('');
+    const onExit = vi.fn();
+
+    const pty = new Pty({
+      command: 'bash',
+      args: ['-c', `echo -n "${payload}"`],
+      onExit,
+    });
+
+    const readStream = pty.read;
+    readStream.on('data', (data) => {
+      buffer = Buffer.concat([buffer, data]);
+    });
+
+    await vi.waitFor(() => expect(onExit).toHaveBeenCalledTimes(1));
+    expect(onExit).toHaveBeenCalledWith(null, 0);
+    expect(buffer.toString().trim().replace(/\r/g, '')).toBe(payload.trim());
+  });
+
   testSkipOnDarwin('does not leak files', async () => {
     const oldFds = getOpenFds();
     const promises = [];
@@ -364,7 +384,7 @@ describe('PTY', { repeats: 500 }, () => {
       let buffer = Buffer.from('');
 
       const pty = new Pty({
-        command: '/bin/sh',
+        command: 'sh',
         args: ['-c', 'sleep 0.1 ; ls /proc/$$/fd'],
         onExit,
       });
@@ -412,7 +432,7 @@ describe('PTY', { repeats: 500 }, () => {
       buffers[i] = Buffer.from('');
 
       const pty = new Pty({
-        command: '/bin/cat',
+        command: 'cat',
         onExit,
       });
 
@@ -460,7 +480,7 @@ describe('PTY', { repeats: 500 }, () => {
 
     await expect(async () => {
       new Pty({
-        command: '/bin/this-does-not-exist',
+        command: 'this-does-not-exist',
         onExit: () => {},
       });
     }).rejects.toThrow('No such file or directory');
@@ -472,7 +492,7 @@ describe('PTY', { repeats: 500 }, () => {
     const oldFds = getOpenFds();
     const onExit = vi.fn();
     const pty = new Pty({
-      command: '/bin/echo',
+      command: 'echo',
       args: ['hello'],
       onExit,
     });
@@ -498,11 +518,10 @@ describe('PTY', { repeats: 500 }, () => {
 
   test('cannot resize when out of range', async () => {
     const oldFds = getOpenFds();
-    let buffer = '';
 
     const onExit = vi.fn();
     const pty = new Pty({
-      command: '/bin/sh',
+      command: 'sh',
       size: { rows: 24, cols: 80 },
       onExit,
     });
@@ -708,7 +727,7 @@ describe('cgroup opts', async () => {
     const onExit = vi.fn();
 
     const pty = new Pty({
-      command: '/bin/cat',
+      command: 'cat',
       args: ['/proc/self/cgroup'],
       cgroupPath: cgroupState.sliceDir,
       onExit,
@@ -730,7 +749,7 @@ describe('cgroup opts', async () => {
   testOnlyOnDarwin('cgroup is not supported on darwin', async () => {
     expect(() => {
       new Pty({
-        command: '/bin/cat',
+        command: 'cat',
         args: ['/proc/self/cgroup'],
         cgroupPath: '/sys/fs/cgroup/test.slice',
         onExit: vi.fn(),
@@ -773,7 +792,7 @@ describe('sandbox opts', { repeats: 10 }, async () => {
     const onExit = vi.fn();
 
     const pty = new Pty({
-      command: '/bin/sh',
+      command: 'sh',
       args: ['-c', 'echo hello'],
       cgroupPath: cgroupState.sliceDir,
       sandbox: {
@@ -816,8 +835,8 @@ describe('sandbox opts', { repeats: 10 }, async () => {
     const gitPath = `${tempDirPath}/.git`;
     await mkdir(gitPath);
     const pty = new Pty({
-      command: '/bin/sh',
-      args: ['-c', `/bin/sh -c "rm -rf ${gitPath}"`],
+      command: 'sh',
+      args: ['-c', `sh -c "rm -rf ${gitPath}"`],
       cgroupPath: cgroupState.sliceDir,
       sandbox: {
         rules: [
@@ -863,8 +882,8 @@ describe('sandbox opts', { repeats: 10 }, async () => {
     const indexLockPath = `${gitPath}/index.lock`;
     await writeFile(indexLockPath, 'locked');
     const pty = new Pty({
-      command: '/bin/sh',
-      args: ['-c', `/bin/sh -c "rm -f ${indexLockPath}"`],
+      command: 'sh',
+      args: ['-c', `sh -c "rm -f ${indexLockPath}"`],
       cgroupPath: cgroupState.sliceDir,
       sandbox: {
         rules: [
