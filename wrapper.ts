@@ -85,6 +85,7 @@ export class Pty {
       this.read.pause();
       let chunk: Buffer | null;
       while ((chunk = this.read.read()) !== null) {
+        console.log('boi has data')
         this.read.emit('data', chunk);
       }
 
@@ -153,10 +154,7 @@ export class Pty {
       throw err;
     };
 
-    this.read.on('error', (err) => {
-      console.error('error:', err);
-      handleError(err);
-    });
+    this.read.on('error', handleError);
   }
 
   close() {
