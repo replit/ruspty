@@ -14,7 +14,7 @@ use napi::Status::GenericFailure;
 use napi::{self, Env};
 use nix::errno::Errno;
 use nix::fcntl::{fcntl, FcntlArg, FdFlag, OFlag};
-use nix::libc::{self, c_int, ioctl, FIONREAD, TIOCSCTTY, TIOCSWINSZ};
+use nix::libc::{self, c_int, TIOCSCTTY, TIOCSWINSZ};
 use nix::pty::{openpty, Winsize};
 use nix::sys::termios::{self, SetArg};
 

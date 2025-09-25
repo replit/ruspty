@@ -36,7 +36,6 @@ export interface PtyOptions {
   apparmorProfile?: string;
   interactive?: boolean;
   sandbox?: SandboxOptions;
-  exitOutputStabilityPeriod?: number;
   onExit: (err: null | Error, exitCode: number) => void;
 }
 /** A size struct to pass to resize. */
@@ -62,7 +61,6 @@ export declare class Pty {
   /** The pid of the forked process. */
   pid: number;
   constructor(opts: PtyOptions);
-  areFdsEmpty(controllerFd: c_int): boolean;
   /**
    * Transfers ownership of the file descriptor for the PTY controller. This can only be called
    * once (it will error the second time). The caller is responsible for closing the file
