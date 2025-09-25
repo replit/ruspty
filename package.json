@@ -40,7 +40,7 @@
     "build:wrapper": "tsup",
     "prepublishOnly": "napi prepublish -t npm",
     "test": "vitest run",
-    "test:ci": "vitest --reporter=verbose --reporter=github-actions run",
+    "test:ci": "vitest --reporter=verbose --reporter=github-actions --allowOnly run",
     "test:hang": "vitest run --reporter=hanging-process",
     "universal": "napi universal",
     "version": "napi version",
