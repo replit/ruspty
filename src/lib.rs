@@ -7,10 +7,7 @@ use std::os::fd::{FromRawFd, IntoRawFd, RawFd};
 use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
 use std::thread;
-use std::time::Duration;
 
-use backoff::backoff::Backoff;
-use backoff::ExponentialBackoffBuilder;
 use napi::bindgen_prelude::JsFunction;
 use napi::threadsafe_function::{ErrorStrategy, ThreadsafeFunction, ThreadsafeFunctionCallMode};
 use napi::Status::GenericFailure;
@@ -92,49 +89,6 @@ pub const MIN_U16_VALUE: u16 = u16::MIN;
 
 fn cast_to_napi_error(err: Errno) -> napi::Error {
   napi::Error::new(GenericFailure, err)
-}
-
-// if the child process exits before the controller fd is fully read or the user fd is fully
-// flushed, we might accidentally end in a case where onExit is called but js hasn't had
-// the chance to fully read the controller fd
-// let's wait until the controller fd is fully read before we call onExit
-fn poll_pty_fds_until_read(controller_fd: RawFd, user_fd: RawFd) {
-  let mut backoff = ExponentialBackoffBuilder::default()
-    .with_initial_interval(Duration::from_millis(1))
-    .with_max_interval(Duration::from_millis(100))
-    .with_max_elapsed_time(Some(Duration::from_secs(1)))
-    .build();
-
-  loop {
-    // check both input and output queues for both FDs
-    let mut controller_inq: i32 = 0;
-    let mut user_inq: i32 = 0;
-
-    // safe because we're passing valid file descriptors and properly sized integers
-    unsafe {
-      // check bytes waiting to be read (FIONREAD, equivalent to TIOCINQ on Linux)
-      if ioctl(controller_fd, FIONREAD, &mut controller_inq) == -1
-        || ioctl(user_fd, FIONREAD, &mut user_inq) == -1
-      {
-        // break if we can't read
-        break;
-      }
-    }
-
-    // if all queues are empty, we're done
-    if controller_inq == 0 && user_inq == 0 {
-      break;
-    }
-
-    // apply backoff strategy
-    if let Some(d) = backoff.next_backoff() {
-      thread::sleep(d);
-      continue;
-    } else {
-      // we have exhausted our attempts
-      break;
-    }
-  }
 }
 
 #[napi]
@@ -338,9 +292,6 @@ impl Pty {
     thread::spawn(move || {
       let wait_result = child.wait();
 
-      // try to wait for the controller fd to be fully read
-      poll_pty_fds_until_read(raw_controller_fd, raw_user_fd);
-
       match wait_result {
         Ok(status) => {
           if status.success() {
@@ -372,6 +323,43 @@ impl Pty {
       user_fd: Some(user_fd),
       pid,
     })
+  }
+
+  // if the child process exits before the controller fd is fully read or the user fd is fully
+  // flushed, we might accidentally end in a case where onExit is called but js hasn't had
+  // the chance to fully read the controller fd
+  // let's wait until the controller fd is fully read before we call onExit
+  #[napi]
+  #[allow(dead_code)]
+  pub fn are_fds_empty(&self, controller_fd: c_int) -> Result<bool, napi::Error> {
+    let user_fd = if let Some(fd) = &self.user_fd {
+      fd.as_raw_fd()
+    } else {
+      return Err(napi::Error::new(
+        napi::Status::GenericFailure,
+        "fd failed: bad file descriptor (os error 9)",
+      ));
+    };
+
+    // check both input and output queues for both FDs
+    let mut controller_inq: i32 = 0;
+    let mut user_inq: i32 = 0;
+
+    // safe because we're passing valid file descriptors and properly sized integers
+    unsafe {
+      // check bytes waiting to be read (FIONREAD, equivalent to TIOCINQ on Linux)
+      if ioctl(controller_fd, FIONREAD, &mut controller_inq) == -1
+        || ioctl(user_fd, FIONREAD, &mut user_inq) == -1
+      {
+        return Err(napi::Error::new(
+          napi::Status::GenericFailure,
+          format!("ioctl FIONREAD failed: {}", Error::last_os_error()),
+        ));
+      }
+    }
+
+    // if all queues are empty, we're done
+    Ok(controller_inq == 0 && user_inq == 0)
   }
 
   /// Transfers ownership of the file descriptor for the PTY controller. This can only be called

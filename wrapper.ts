@@ -23,6 +23,19 @@ type ExitResult = {
   code: number;
 };
 
+async function retryWithBackoff<T extends Function>(fn: T) {
+  for (let attempt = 0; attempt <= 4; attempt++) {
+    try {
+      return fn();
+    } catch (error) {
+      if (attempt === 4) throw error;
+
+      const delay = Math.pow(10, attempt);
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+}
+
 /**
  * A very thin wrapper around PTYs and processes.
  *
@@ -77,23 +90,34 @@ export class Pty {
     let readFinished = new Promise<void>((resolve) => {
       markReadFinished = resolve;
     });
-    const mockedExit = (error: NodeJS.ErrnoException | null, code: number) => {
+    const mockedExit = async (
+      error: NodeJS.ErrnoException | null,
+      code: number,
+    ) => {
       console.log('mockedExit', { error, code });
       markExited({ error, code });
 
-      // try to read the last of the data before closing the fd
-      console.log('pausing')
-      this.read.pause();
-      let chunk: Buffer | null;
-      while ((chunk = this.read.read()) !== null) {
-        console.log('boi has data')
-        this.read.emit('data', chunk);
-      }
+      // poll until the fds are empty before we close
+      await retryWithBackoff(() => {
+        // this effectively checks FIONREAD for the controller side
+        const bytesAvailable = this.#socket.readableLength;
+        console.log('bytesAvailable', bytesAvailable);
+        if (bytesAvailable > 0) {
+          throw new Error('still data to read');
+        }
 
-      setImmediate(() => {
-        console.log('closing user fd')
-        this.#pty.closeUserFd();
+        // more expensive check second
+        const fdsEmpty = this.#pty.areFdsEmpty(this.#fd);
+        console.log('fdsEmpty', fdsEmpty);
+        if (!fdsEmpty) {
+          throw new Error('fds not empty yet');
+        }
       });
+
+      console.log('yay done')
+
+      // try to read the last of the data before closing the fd
+      this.#pty.closeUserFd();
     };
 
     // when pty exits, we should wait until the fd actually ends (end OR error)
