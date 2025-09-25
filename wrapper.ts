@@ -78,7 +78,12 @@ export class Pty {
       markReadFinished = resolve;
     });
     const mockedExit = (error: NodeJS.ErrnoException | null, code: number) => {
+      console.log('mockedExit', { error, code });
       markExited({ error, code });
+
+      setImmediate(() => {
+        this.#pty.closeUserFd();
+      });
     };
 
     // when pty exits, we should wait until the fd actually ends (end OR error)
@@ -105,8 +110,14 @@ export class Pty {
       realExit(result.error, result.code);
     };
 
-    this.read.once('end', markReadFinished);
-    this.read.once('close', handleClose);
+    this.read.once('end', () => {
+      console.log('read end');
+      markReadFinished();
+    });
+    this.read.once('close', () => {
+      console.log('read close');
+      handleClose();
+    });
 
     // PTYs signal their done-ness with an EIO error. we therefore need to filter them out (as well as
     // cleaning up other spurious errors) so that the user doesn't need to handle them and be in
@@ -135,7 +146,10 @@ export class Pty {
       throw err;
     };
 
-    this.read.on('error', handleError);
+    this.read.on('error', (err) => {
+      console.error('error:', err);
+      handleError(err);
+    });
   }
 
   close() {

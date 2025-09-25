@@ -17,7 +17,7 @@ use napi::Status::GenericFailure;
 use napi::{self, Env};
 use nix::errno::Errno;
 use nix::fcntl::{fcntl, FcntlArg, FdFlag, OFlag};
-use nix::libc::{self, c_int, ioctl, FIONREAD, TIOCOUTQ, TIOCSCTTY, TIOCSWINSZ};
+use nix::libc::{self, c_int, ioctl, FIONREAD, TIOCSCTTY, TIOCSWINSZ};
 use nix::pty::{openpty, Winsize};
 use nix::sys::termios::{self, SetArg};
 
@@ -31,6 +31,7 @@ mod sandbox;
 #[allow(dead_code)]
 struct Pty {
   controller_fd: Option<OwnedFd>,
+  user_fd: Option<OwnedFd>,
   /// The pid of the forked process.
   pub pid: u32,
 }
@@ -107,9 +108,7 @@ fn poll_pty_fds_until_read(controller_fd: RawFd, user_fd: RawFd) {
   loop {
     // check both input and output queues for both FDs
     let mut controller_inq: i32 = 0;
-    let mut controller_outq: i32 = 0;
     let mut user_inq: i32 = 0;
-    let mut user_outq: i32 = 0;
 
     // safe because we're passing valid file descriptors and properly sized integers
     unsafe {
@@ -120,18 +119,10 @@ fn poll_pty_fds_until_read(controller_fd: RawFd, user_fd: RawFd) {
         // break if we can't read
         break;
       }
-
-      // check bytes waiting to be written (TIOCOUTQ)
-      if ioctl(controller_fd, TIOCOUTQ, &mut controller_outq) == -1
-        || ioctl(user_fd, TIOCOUTQ, &mut user_outq) == -1
-      {
-        // break if we can't read
-        break;
-      }
     }
 
     // if all queues are empty, we're done
-    if controller_inq == 0 && controller_outq == 0 && user_inq == 0 && user_outq == 0 {
+    if controller_inq == 0 && user_inq == 0 {
       break;
     }
 
@@ -349,7 +340,6 @@ impl Pty {
 
       // try to wait for the controller fd to be fully read
       poll_pty_fds_until_read(raw_controller_fd, raw_user_fd);
-      drop(user_fd);
 
       match wait_result {
         Ok(status) => {
@@ -379,6 +369,7 @@ impl Pty {
 
     Ok(Pty {
       controller_fd: Some(controller_fd),
+      user_fd: Some(user_fd),
       pid,
     })
   }
@@ -397,6 +388,13 @@ impl Pty {
         "fd failed: bad file descriptor (os error 9)",
       ))
     }
+  }
+
+  #[napi]
+  #[allow(dead_code)]
+  pub fn close_user_fd(&mut self) -> Result<(), napi::Error> {
+    self.user_fd.take();
+    Ok(())
   }
 }
 
