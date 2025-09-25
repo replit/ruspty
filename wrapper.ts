@@ -23,6 +23,10 @@ type ExitResult = {
   code: number;
 };
 
+interface FullPtyOptions extends PtyOptions {
+  exitOutputStabilityPeriod?: number;
+}
+
 /**
  * A very thin wrapper around PTYs and processes.
  *
@@ -65,7 +69,7 @@ export class Pty {
     return this.#socket;
   }
 
-  constructor(options: PtyOptions) {
+  constructor(options: FullPtyOptions) {
     const realExit = options.onExit;
 
     let markExited!: (value: ExitResult) => void;
@@ -82,7 +86,9 @@ export class Pty {
       code: number,
     ) => {
       markExited({ error, code });
-      await new Promise((r) => setTimeout(r, options.exitOutputStabilityPeriod ?? 50));
+      await new Promise((r) =>
+        setTimeout(r, options.exitOutputStabilityPeriod ?? 50),
+      );
       this.#pty.closeUserFd();
     };
 
@@ -111,7 +117,7 @@ export class Pty {
     };
 
     this.read.once('end', markReadFinished);
-    this.read.once('close',handleClose);
+    this.read.once('close', handleClose);
 
     // PTYs signal their done-ness with an EIO error. we therefore need to filter them out (as well as
     // cleaning up other spurious errors) so that the user doesn't need to handle them and be in
