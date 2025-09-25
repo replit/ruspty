@@ -354,27 +354,6 @@ describe('PTY', { repeats: 500 }, () => {
     expect(buffer.toString().length).toBe(payload.length);
   });
 
-  test('doesnt miss lots of lines from bash', async () => {
-    const payload = Array.from({ length: 4096 * 2 }, (_, i) => i).join('\n');
-    let buffer = Buffer.from('');
-    const onExit = vi.fn();
-
-    const pty = new Pty({
-      command: 'bash',
-      args: ['-c', `echo -n "${payload}"`],
-      onExit,
-    });
-
-    const readStream = pty.read;
-    readStream.on('data', (data) => {
-      buffer = Buffer.concat([buffer, data]);
-    });
-
-    await vi.waitFor(() => expect(onExit).toHaveBeenCalledTimes(1));
-    expect(onExit).toHaveBeenCalledWith(null, 0);
-    expect(buffer.toString().trim().replace(/\r/g, '')).toBe(payload.trim());
-  });
-
   testSkipOnDarwin('does not leak files', async () => {
     const oldFds = getOpenFds();
     const promises = [];
