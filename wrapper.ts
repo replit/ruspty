@@ -86,10 +86,10 @@ export class Pty {
       code: number,
     ) => {
       markExited({ error, code });
-      await new Promise((r) =>
-        setTimeout(r, options.exitOutputStabilityPeriod ?? 50),
-      );
-      this.#pty.closeUserFd();
+      // await new Promise((r) =>
+      //   setTimeout(r, options.exitOutputStabilityPeriod ?? 50),
+      // );
+      // this.#pty.closeUserFd();
     };
 
     // when pty exits, we should wait until the fd actually ends (end OR error)
@@ -137,7 +137,10 @@ export class Pty {
           this.read.off('error', handleError);
           // emit 'end' to signal no more data
           // this will trigger our 'end' handler which marks readFinished
-          this.read.emit('end');
+          setTimeout(
+            () => this.read.emit('end'),
+            options.exitOutputStabilityPeriod ?? 10,
+          );
           return;
         }
       }

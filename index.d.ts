@@ -67,5 +67,4 @@ export declare class Pty {
    * descriptor.
    */
   takeFd(): c_int;
-  closeUserFd(): void;
 }
