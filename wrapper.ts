@@ -82,6 +82,7 @@ export class Pty {
       markExited({ error, code });
 
       // try to read the last of the data before closing the fd
+      console.log('pausing')
       this.read.pause();
       let chunk: Buffer | null;
       while ((chunk = this.read.read()) !== null) {
@@ -90,6 +91,7 @@ export class Pty {
       }
 
       setImmediate(() => {
+        console.log('closing user fd')
         this.#pty.closeUserFd();
       });
     };
