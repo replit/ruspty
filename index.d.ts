@@ -36,6 +36,7 @@ export interface PtyOptions {
   apparmorProfile?: string;
   interactive?: boolean;
   sandbox?: SandboxOptions;
+  exitOutputStabilityPeriod?: number;
   onExit: (err: null | Error, exitCode: number) => void;
 }
 /** A size struct to pass to resize. */

@@ -325,43 +325,6 @@ impl Pty {
     })
   }
 
-  // if the child process exits before the controller fd is fully read or the user fd is fully
-  // flushed, we might accidentally end in a case where onExit is called but js hasn't had
-  // the chance to fully read the controller fd
-  // let's wait until the controller fd is fully read before we call onExit
-  #[napi]
-  #[allow(dead_code)]
-  pub fn are_fds_empty(&self, controller_fd: c_int) -> Result<bool, napi::Error> {
-    let user_fd = if let Some(fd) = &self.user_fd {
-      fd.as_raw_fd()
-    } else {
-      return Err(napi::Error::new(
-        napi::Status::GenericFailure,
-        "fd failed: bad file descriptor (os error 9)",
-      ));
-    };
-
-    // check both input and output queues for both FDs
-    let mut controller_inq: i32 = 0;
-    let mut user_inq: i32 = 0;
-
-    // safe because we're passing valid file descriptors and properly sized integers
-    unsafe {
-      // check bytes waiting to be read (FIONREAD, equivalent to TIOCINQ on Linux)
-      if ioctl(controller_fd, FIONREAD, &mut controller_inq) == -1
-        || ioctl(user_fd, FIONREAD, &mut user_inq) == -1
-      {
-        return Err(napi::Error::new(
-          napi::Status::GenericFailure,
-          format!("ioctl FIONREAD failed: {}", Error::last_os_error()),
-        ));
-      }
-    }
-
-    // if all queues are empty, we're done
-    Ok(controller_inq == 0 && user_inq == 0)
-  }
-
   /// Transfers ownership of the file descriptor for the PTY controller. This can only be called
   /// once (it will error the second time). The caller is responsible for closing the file
   /// descriptor.

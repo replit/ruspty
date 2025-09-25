@@ -23,19 +23,6 @@ type ExitResult = {
   code: number;
 };
 
-async function retryWithBackoff<T extends Function>(fn: T) {
-  for (let attempt = 0; attempt <= 4; attempt++) {
-    try {
-      return fn();
-    } catch (error) {
-      if (attempt === 4) throw error;
-
-      const delay = Math.pow(10, attempt);
-      await new Promise((resolve) => setTimeout(resolve, delay));
-    }
-  }
-}
-
 /**
  * A very thin wrapper around PTYs and processes.
  *
@@ -94,29 +81,8 @@ export class Pty {
       error: NodeJS.ErrnoException | null,
       code: number,
     ) => {
-      console.log('mockedExit', { error, code });
       markExited({ error, code });
-
-      // poll until the fds are empty before we close
-      await retryWithBackoff(() => {
-        // this effectively checks FIONREAD for the controller side
-        const bytesAvailable = this.#socket.readableLength;
-        console.log('bytesAvailable', bytesAvailable);
-        if (bytesAvailable > 0) {
-          throw new Error('still data to read');
-        }
-
-        // more expensive check second
-        const fdsEmpty = this.#pty.areFdsEmpty(this.#fd);
-        console.log('fdsEmpty', fdsEmpty);
-        if (!fdsEmpty) {
-          throw new Error('fds not empty yet');
-        }
-      });
-
-      console.log('yay done')
-
-      // try to read the last of the data before closing the fd
+      await new Promise((r) => setTimeout(r, options.exitOutputStabilityPeriod ?? 50));
       this.#pty.closeUserFd();
     };
 
@@ -144,14 +110,8 @@ export class Pty {
       realExit(result.error, result.code);
     };
 
-    this.read.once('end', () => {
-      console.log('read end');
-      markReadFinished();
-    });
-    this.read.once('close', () => {
-      console.log('read close');
-      handleClose();
-    });
+    this.read.once('end', markReadFinished);
+    this.read.once('close',handleClose);
 
     // PTYs signal their done-ness with an EIO error. we therefore need to filter them out (as well as
     // cleaning up other spurious errors) so that the user doesn't need to handle them and be in

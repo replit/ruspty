@@ -354,7 +354,7 @@ describe('PTY', { repeats: 500 }, () => {
     expect(buffer.toString().length).toBe(payload.length);
   });
 
-  test.only('doesnt miss lots of lines from bash', async () => {
+  test('doesnt miss lots of lines from bash', async () => {
     const payload = Array.from({ length: 5000 }, (_, i) => i).join('\n');
     let buffer = Buffer.from('');
     const onExit = vi.fn();
