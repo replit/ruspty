@@ -81,10 +81,16 @@ export class Pty {
       console.log('mockedExit', { error, code });
       markExited({ error, code });
 
-      // set immediate to give us one more chance to read any remaining data
-      setTimeout(() => {
+      // try to read the last of the data before closing the fd
+      this.read.pause();
+      let chunk: Buffer | null;
+      while ((chunk = this.read.read()) !== null) {
+        this.read.emit('data', chunk);
+      }
+
+      setImmediate(() => {
         this.#pty.closeUserFd();
-      }, 100);
+      });
     };
 
     // when pty exits, we should wait until the fd actually ends (end OR error)
