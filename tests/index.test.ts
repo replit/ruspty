@@ -371,15 +371,10 @@ describe('PTY', { repeats: 500 }, () => {
     });
 
     await vi.waitFor(() => expect(onExit).toHaveBeenCalledTimes(1));
-    try {
-      expect(onExit).toHaveBeenCalledWith(null, 0);
-      expect(buffer.toString().trim().replace(/\r/g, '').length).toBe(
-        payload.length,
-      );
-    } catch (e) {
-      console.log('FAIL');
-      throw e;
-    }
+    expect(onExit).toHaveBeenCalledWith(null, 0);
+    expect(buffer.toString().trim().replace(/\r/g, '').length).toBe(
+      payload.length,
+    );
   });
 
   testSkipOnDarwin('does not leak files', async () => {
