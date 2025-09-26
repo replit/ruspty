@@ -77,9 +77,9 @@ describe('PTY', { repeats: 500 }, () => {
     await vi.waitFor(() => expect(onExit).toHaveBeenCalledTimes(1));
     expect(onExit).toHaveBeenCalledWith(null, 0);
     expect(buffer.trim()).toBe(message);
-    expect(getOpenFds()).toStrictEqual(oldFds);
     expect(pty.write.writable).toBe(false);
     expect(pty.read.readable).toBe(false);
+    await vi.waitFor(() => expect(getOpenFds()).toStrictEqual(oldFds));
   });
 
   test('captures an exit code', async () => {
@@ -132,7 +132,7 @@ describe('PTY', { repeats: 500 }, () => {
 
     const expectedResult = 'hello cat\r\nhello cat\r\n';
     expect(result.trim()).toStrictEqual(expectedResult.trim());
-    expect(getOpenFds()).toStrictEqual(oldFds);
+    await vi.waitFor(() => expect(getOpenFds()).toStrictEqual(oldFds));
   });
 
   test('can be started in non-interactive fashion', async () => {
@@ -157,7 +157,7 @@ describe('PTY', { repeats: 500 }, () => {
     let result = buffer.toString();
     const expectedResult = '\r\n';
     expect(result.trim()).toStrictEqual(expectedResult.trim());
-    expect(getOpenFds()).toStrictEqual(oldFds);
+    await vi.waitFor(() => expect(getOpenFds()).toStrictEqual(oldFds));
   });
 
   test('can be resized', async () => {
@@ -211,7 +211,7 @@ describe('PTY', { repeats: 500 }, () => {
     await vi.waitFor(() => expect(onExit).toHaveBeenCalledTimes(1));
     expect(onExit).toHaveBeenCalledWith(null, 0);
     expect(state).toBe('done');
-    expect(getOpenFds()).toStrictEqual(oldFds);
+    await vi.waitFor(() => expect(getOpenFds()).toStrictEqual(oldFds));
   });
 
   test('respects working directory', async () => {
@@ -234,7 +234,7 @@ describe('PTY', { repeats: 500 }, () => {
     await vi.waitFor(() => expect(onExit).toHaveBeenCalledTimes(1));
     expect(onExit).toHaveBeenCalledWith(null, 0);
     expect(buffer.trim()).toBe(cwd);
-    expect(getOpenFds()).toStrictEqual(oldFds);
+    await vi.waitFor(() => expect(getOpenFds()).toStrictEqual(oldFds));
   });
 
   test('respects env', async () => {
@@ -260,7 +260,7 @@ describe('PTY', { repeats: 500 }, () => {
     await vi.waitFor(() => expect(onExit).toHaveBeenCalledTimes(1));
     expect(onExit).toHaveBeenCalledWith(null, 0);
     expect(buffer.trim()).toBe(message);
-    expect(getOpenFds()).toStrictEqual(oldFds);
+    await vi.waitFor(() => expect(getOpenFds()).toStrictEqual(oldFds));
   });
 
   test("resize after exit shouldn't throw", async () => {
@@ -330,7 +330,7 @@ describe('PTY', { repeats: 500 }, () => {
       ).toBe(i);
     }
 
-    expect(getOpenFds()).toStrictEqual(oldFds);
+    await vi.waitFor(() => expect(getOpenFds()).toStrictEqual(oldFds));
   });
 
   test('doesnt miss large output from fast commands', async () => {
@@ -417,7 +417,7 @@ describe('PTY', { repeats: 500 }, () => {
     }
 
     await Promise.all(promises);
-    expect(getOpenFds()).toStrictEqual(oldFds);
+    await vi.waitFor(() => expect(getOpenFds()).toStrictEqual(oldFds));
   });
 
   test('can run concurrent shells', async () => {
@@ -474,7 +474,7 @@ describe('PTY', { repeats: 500 }, () => {
       expect(result).toStrictEqual(expectedResult);
     }
 
-    expect(getOpenFds()).toStrictEqual(oldFds);
+    await vi.waitFor(() => expect(getOpenFds()).toStrictEqual(oldFds));
   });
 
   test("doesn't break when executing non-existing binary", async () => {
@@ -487,7 +487,7 @@ describe('PTY', { repeats: 500 }, () => {
       });
     }).rejects.toThrow('No such file or directory');
 
-    expect(getOpenFds()).toStrictEqual(oldFds);
+    await vi.waitFor(() => expect(getOpenFds()).toStrictEqual(oldFds));
   });
 
   test('cannot be written to after closing', async () => {
@@ -515,7 +515,7 @@ describe('PTY', { repeats: 500 }, () => {
       }
     });
     await vi.waitFor(() => receivedError);
-    expect(getOpenFds()).toStrictEqual(oldFds);
+    await vi.waitFor(() => expect(getOpenFds()).toStrictEqual(oldFds));
   });
 
   test('cannot resize when out of range', async () => {
@@ -554,7 +554,7 @@ describe('PTY', { repeats: 500 }, () => {
 
     await vi.waitFor(() => expect(onExit).toHaveBeenCalledTimes(1));
     expect(onExit).toHaveBeenCalledWith(null, -1);
-    expect(getOpenFds()).toStrictEqual(oldFds);
+    await vi.waitFor(() => expect(getOpenFds()).toStrictEqual(oldFds));
   });
 });
 
@@ -745,7 +745,7 @@ describe('cgroup opts', async () => {
     // Verify that the process was placed in the correct cgroup by
     // checking its output contains our unique slice name
     expect(buffer).toContain(cgroupState.sliceName);
-    expect(getOpenFds()).toStrictEqual(oldFds);
+    await vi.waitFor(() => expect(getOpenFds()).toStrictEqual(oldFds));
   });
 
   testOnlyOnDarwin('cgroup is not supported on darwin', async () => {
@@ -822,7 +822,7 @@ describe('sandbox opts', { repeats: 10 }, async () => {
     await vi.waitFor(() => expect(onExit).toHaveBeenCalledTimes(1));
     expect(onExit).toHaveBeenCalledWith(null, 0);
     expect(buffer).toContain('hello');
-    expect(getOpenFds()).toStrictEqual(oldFds);
+    await vi.waitFor(() => expect(getOpenFds()).toStrictEqual(oldFds));
   });
 
   testSkipOnDarwin('basic protection against git-yeetage', async () => {
@@ -867,7 +867,7 @@ describe('sandbox opts', { repeats: 10 }, async () => {
     expect(buffer.trimEnd()).toBe(
       `Tried to delete a forbidden path: ${gitPath}`,
     );
-    expect(getOpenFds()).toStrictEqual(oldFds);
+    await vi.waitFor(() => expect(getOpenFds()).toStrictEqual(oldFds));
   });
 
   testSkipOnDarwin('can exclude prefixes', async () => {
@@ -913,7 +913,7 @@ describe('sandbox opts', { repeats: 10 }, async () => {
     await vi.waitFor(() => expect(onExit).toHaveBeenCalledTimes(1));
     expect(onExit).toHaveBeenCalledWith(null, 0);
     expect(buffer.trimEnd()).toBe('');
-    expect(getOpenFds()).toStrictEqual(oldFds);
+    await vi.waitFor(() => expect(getOpenFds()).toStrictEqual(oldFds));
   });
 });
 
