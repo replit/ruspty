@@ -1,4 +1,4 @@
-import type { Readable, Writable } from 'node:stream';
+import { type Readable, type Writable } from 'node:stream';
 import { ReadStream } from 'node:tty';
 import {
   Pty as RawPty,
@@ -15,6 +15,7 @@ import {
   type SandboxRule,
   type SandboxOptions,
 } from './index.js';
+import { SyntheticEOFDetector } from './syntheticEof.js';
 
 export { Operation, type SandboxRule, type SandboxOptions, type PtyOptions };
 
@@ -56,14 +57,8 @@ export class Pty {
   #fdClosed: boolean = false;
 
   #socket: ReadStream;
-
-  get read(): Readable {
-    return this.#socket;
-  }
-
-  get write(): Writable {
-    return this.#socket;
-  }
+  read: Readable;
+  write: Writable;
 
   constructor(options: PtyOptions) {
     const realExit = options.onExit;
@@ -77,18 +72,16 @@ export class Pty {
     let readFinished = new Promise<void>((resolve) => {
       markReadFinished = resolve;
     });
-    const mockedExit = (error: NodeJS.ErrnoException | null, code: number) => {
-      markExited({ error, code });
-    };
 
     // when pty exits, we should wait until the fd actually ends (end OR error)
     // before closing the pty
     // we use a mocked exit function to capture the exit result
     // and then call the real exit function after the fd is fully read
-    this.#pty = new RawPty({ ...options, onExit: mockedExit });
-    // Transfer ownership of the FD to us.
-    this.#fd = this.#pty.takeFd();
-
+    this.#pty = new RawPty({
+      ...options,
+      onExit: (error, code) => markExited({ error, code }),
+    });
+    this.#fd = this.#pty.takeControllerFd();
     this.#socket = new ReadStream(this.#fd);
 
     // catch end events
@@ -105,9 +98,6 @@ export class Pty {
       realExit(result.error, result.code);
     };
 
-    this.read.once('end', markReadFinished);
-    this.read.once('close', handleClose);
-
     // PTYs signal their done-ness with an EIO error. we therefore need to filter them out (as well as
     // cleaning up other spurious errors) so that the user doesn't need to handle them and be in
     // blissful peace.
@@ -123,10 +113,10 @@ export class Pty {
           // EIO only happens when the child dies. It is therefore our only true signal that there
           // is nothing left to read and we can start tearing things down. If we hadn't received an
           // error so far, we are considered to be in good standing.
-          this.read.off('error', handleError);
+          this.#socket.off('error', handleError);
           // emit 'end' to signal no more data
           // this will trigger our 'end' handler which marks readFinished
-          this.read.emit('end');
+          this.#socket.emit('end');
           return;
         }
       }
@@ -135,7 +125,24 @@ export class Pty {
       throw err;
     };
 
-    this.read.on('error', handleError);
+    // we need this synthetic eof detector as the pty stream has no way
+    // of distinguishing the program existing vs the data being fully read
+    // this is injected on the rust side after the .wait on the child process
+    // returns
+    // more details: https://github.com/replit/ruspty/pull/93
+    this.read = this.#socket.pipe(new SyntheticEOFDetector());
+    this.write = this.#socket;
+
+    this.#socket.on('error', handleError);
+    this.#socket.once('end', markReadFinished);
+    this.#socket.once('close', handleClose);
+    this.read.once('synthetic-eof', async () => {
+      // even if the program accidentally emits our synthetic eof
+      // we dont yank the user fd away from them until the program actually exits
+      // (and drops its copy of the user fd)
+      await exitResult;
+      this.#pty.dropUserFd();
+    });
   }
 
   close() {
