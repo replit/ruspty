@@ -81,9 +81,7 @@ export class Pty {
       ...options,
       onExit: (error, code) => markExited({ error, code }),
     });
-    // Transfer ownership of the FD to us.
     this.#fd = this.#pty.takeControllerFd();
-
     this.#socket = new ReadStream(this.#fd);
 
     // catch end events
@@ -127,13 +125,24 @@ export class Pty {
       throw err;
     };
 
+    // we need this synthetic eof detector as the pty stream has no way
+    // of distinguishing the program existing vs the data being fully read
+    // this is injected on the rust side after the .wait on the child process
+    // returns
+    // more details: https://github.com/replit/ruspty/pull/93
     this.read = this.#socket.pipe(new SyntheticEOFDetector());
     this.write = this.#socket;
 
     this.#socket.on('error', handleError);
     this.#socket.once('end', markReadFinished);
     this.#socket.once('close', handleClose);
-    this.read.once('synthetic-eof', () => this.#pty.dropUserFd());
+    this.read.once('synthetic-eof', async () => {
+      // even if the program accidentally emits our synthetic eof
+      // we dont yank the user fd away from them until the program actually exits
+      // (and drops its copy of the user fd)
+      await exitResult;
+      this.#pty.dropUserFd();
+    });
   }
 
   close() {
