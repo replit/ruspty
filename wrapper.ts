@@ -1,4 +1,4 @@
-import { Transform, type Readable, type Writable } from 'node:stream';
+import { type Readable, type Writable } from 'node:stream';
 import { ReadStream } from 'node:tty';
 import {
   Pty as RawPty,
@@ -82,7 +82,7 @@ export class Pty {
       onExit: (error, code) => markExited({ error, code }),
     });
     // Transfer ownership of the FD to us.
-    this.#fd = this.#pty.takeFd();
+    this.#fd = this.#pty.takeControllerFd();
 
     this.#socket = new ReadStream(this.#fd);
 
@@ -104,7 +104,6 @@ export class Pty {
     // cleaning up other spurious errors) so that the user doesn't need to handle them and be in
     // blissful peace.
     const handleError = (err: NodeJS.ErrnoException) => {
-      console.log('handling error', err);
       if (err.code) {
         const code = err.code;
         if (code === 'EINTR' || code === 'EAGAIN') {
@@ -132,19 +131,9 @@ export class Pty {
     this.write = this.#socket;
 
     this.#socket.on('error', handleError);
-    this.#socket.once('end', () => {
-      console.log('socket end');
-      markReadFinished();
-    });
-    this.#socket.once('close', () => {
-      console.log('socket close');
-      handleClose();
-    });
-    this.read.once('synthetic-eof', () => {
-      console.log('synthetic eof');
-      this.#pty.closeUserFd();
-    });
-    this.read.on('data', () => console.log('data'));
+    this.#socket.once('end', markReadFinished);
+    this.#socket.once('close', handleClose);
+    this.read.once('synthetic-eof', () => this.#pty.dropUserFd());
   }
 
   close() {

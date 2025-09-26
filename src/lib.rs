@@ -342,7 +342,7 @@ impl Pty {
   /// descriptor.
   #[napi]
   #[allow(dead_code)]
-  pub fn take_fd(&mut self) -> Result<c_int, napi::Error> {
+  pub fn take_controller_fd(&mut self) -> Result<c_int, napi::Error> {
     if let Some(fd) = self.controller_fd.take() {
       Ok(fd.into_raw_fd())
     } else {
@@ -353,9 +353,11 @@ impl Pty {
     }
   }
 
+  /// Closes the owned file descriptor for the PTY controller. The Nodejs side must call this
+  /// when it is done with the file descriptor to avoid leaking FDs.
   #[napi]
   #[allow(dead_code)]
-  pub fn close_user_fd(&mut self) -> Result<(), napi::Error> {
+  pub fn drop_user_fd(&mut self) -> Result<(), napi::Error> {
     self.user_fd.take();
     Ok(())
   }
