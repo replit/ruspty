@@ -1,4 +1,4 @@
-import type { Readable, Writable } from 'node:stream';
+import { Transform, type Readable, type Writable } from 'node:stream';
 import { ReadStream } from 'node:tty';
 import {
   Pty as RawPty,
@@ -15,6 +15,7 @@ import {
   type SandboxRule,
   type SandboxOptions,
 } from './index.js';
+import { SyntheticEOFDetector } from './syntheticEof.js';
 
 export { Operation, type SandboxRule, type SandboxOptions, type PtyOptions };
 
@@ -22,10 +23,6 @@ type ExitResult = {
   error: NodeJS.ErrnoException | null;
   code: number;
 };
-
-interface FullPtyOptions extends PtyOptions {
-  exitOutputStabilityPeriod?: number;
-}
 
 /**
  * A very thin wrapper around PTYs and processes.
@@ -60,16 +57,10 @@ export class Pty {
   #fdClosed: boolean = false;
 
   #socket: ReadStream;
+  read: Readable;
+  write: Writable;
 
-  get read(): Readable {
-    return this.#socket;
-  }
-
-  get write(): Writable {
-    return this.#socket;
-  }
-
-  constructor(options: FullPtyOptions) {
+  constructor(options: PtyOptions) {
     const realExit = options.onExit;
 
     let markExited!: (value: ExitResult) => void;
@@ -81,22 +72,15 @@ export class Pty {
     let readFinished = new Promise<void>((resolve) => {
       markReadFinished = resolve;
     });
-    const mockedExit = async (
-      error: NodeJS.ErrnoException | null,
-      code: number,
-    ) => {
-      markExited({ error, code });
-      await new Promise((r) =>
-        setTimeout(r, options.exitOutputStabilityPeriod ?? 50),
-      );
-      this.#pty.closeUserFd();
-    };
 
     // when pty exits, we should wait until the fd actually ends (end OR error)
     // before closing the pty
     // we use a mocked exit function to capture the exit result
     // and then call the real exit function after the fd is fully read
-    this.#pty = new RawPty({ ...options, onExit: mockedExit });
+    this.#pty = new RawPty({
+      ...options,
+      onExit: (error, code) => markExited({ error, code }),
+    });
     // Transfer ownership of the FD to us.
     this.#fd = this.#pty.takeFd();
 
@@ -116,13 +100,11 @@ export class Pty {
       realExit(result.error, result.code);
     };
 
-    this.read.once('end', markReadFinished);
-    this.read.once('close', handleClose);
-
     // PTYs signal their done-ness with an EIO error. we therefore need to filter them out (as well as
     // cleaning up other spurious errors) so that the user doesn't need to handle them and be in
     // blissful peace.
     const handleError = (err: NodeJS.ErrnoException) => {
+      console.log('handling error', err);
       if (err.code) {
         const code = err.code;
         if (code === 'EINTR' || code === 'EAGAIN') {
@@ -134,10 +116,10 @@ export class Pty {
           // EIO only happens when the child dies. It is therefore our only true signal that there
           // is nothing left to read and we can start tearing things down. If we hadn't received an
           // error so far, we are considered to be in good standing.
-          this.read.off('error', handleError);
+          this.#socket.off('error', handleError);
           // emit 'end' to signal no more data
           // this will trigger our 'end' handler which marks readFinished
-          this.read.emit('end');
+          this.#socket.emit('end');
           return;
         }
       }
@@ -146,7 +128,23 @@ export class Pty {
       throw err;
     };
 
-    this.read.on('error', handleError);
+    this.read = this.#socket.pipe(new SyntheticEOFDetector());
+    this.write = this.#socket;
+
+    this.#socket.on('error', handleError);
+    this.#socket.once('end', () => {
+      console.log('socket end');
+      markReadFinished();
+    });
+    this.#socket.once('close', () => {
+      console.log('socket close');
+      handleClose();
+    });
+    this.read.once('synthetic-eof', () => {
+      console.log('synthetic eof');
+      this.#pty.closeUserFd();
+    });
+    this.read.on('data', () => console.log('data'));
   }
 
   close() {

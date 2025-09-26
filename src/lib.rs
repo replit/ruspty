@@ -39,6 +39,8 @@ pub enum Operation {
   Delete,
 }
 
+const SYNTHETIC_EOF: &[u8] = b"\x1B]7878\x1B\\";
+
 /// Sandboxing rules. Deleting / modifying a path with any of the prefixes is forbidden and will
 /// cause process termination.
 #[napi(object)]
@@ -291,6 +293,16 @@ impl Pty {
 
     thread::spawn(move || {
       let wait_result = child.wait();
+
+      // by this point, child has closed its copy of the user_fd
+      // lets inject our synthetic EOF OSC into the user_fd
+      unsafe {
+        libc::write(
+          raw_user_fd,
+          SYNTHETIC_EOF.as_ptr() as *const libc::c_void,
+          SYNTHETIC_EOF.len(),
+        );
+      }
 
       match wait_result {
         Ok(status) => {
