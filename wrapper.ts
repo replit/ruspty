@@ -56,6 +56,7 @@ export class Pty {
   #handledClose: boolean = false;
   #socketClosed: boolean = false;
   #userFdDropped: boolean = false;
+  #fdDropTimeout: ReturnType<typeof setTimeout> | null = null;
 
   #socket: ReadStream;
   read: Readable;
@@ -80,7 +81,15 @@ export class Pty {
     // and then call the real exit function after the fd is fully read
     this.#pty = new RawPty({
       ...options,
-      onExit: (error, code) => markExited({ error, code }),
+      onExit: (error, code) => {
+        // give nodejs a max of 1s to read the fd before
+        // dropping the fd to avoid leaking it
+        this.#fdDropTimeout = setTimeout(() => {
+          this.dropUserFd();
+        }, 1000);
+
+        markExited({ error, code });
+      },
     });
     this.#fd = this.#pty.takeControllerFd();
     this.#socket = new ReadStream(this.#fd);
@@ -148,8 +157,21 @@ export class Pty {
       }
 
       this.#userFdDropped = true;
-      this.#pty.dropUserFd();
+      this.dropUserFd();
     });
+  }
+
+  private dropUserFd() {
+    if (this.#userFdDropped) {
+      return;
+    }
+
+    if (this.#fdDropTimeout) {
+      clearTimeout(this.#fdDropTimeout);
+    }
+
+    this.#userFdDropped = true;
+    this.#pty.dropUserFd();
   }
 
   close() {
@@ -158,10 +180,7 @@ export class Pty {
     // end instead of destroy so that the user can read the last bits of data
     // and allow graceful close event to mark the fd as ended
     this.#socket.end();
-
-    if (!this.#userFdDropped) {
-      this.#pty.dropUserFd();
-    }
+    this.dropUserFd();
   }
 
   resize(size: Size) {
