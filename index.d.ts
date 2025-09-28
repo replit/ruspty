@@ -45,6 +45,7 @@ export interface Size {
 }
 export const MAX_U16_VALUE: number;
 export const MIN_U16_VALUE: number;
+export declare function getSyntheticEofSequence(): Buffer;
 /** Resize the terminal. */
 export declare function ptyResize(fd: number, size: Size): void;
 /**

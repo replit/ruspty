@@ -15,7 +15,7 @@ import {
   type SandboxRule,
   type SandboxOptions,
 } from './index.js';
-import { SyntheticEOFDetector } from './syntheticEof.js';
+import { EOF_EVENT, SyntheticEOFDetector } from './syntheticEof.js';
 
 export { Operation, type SandboxRule, type SandboxOptions, type PtyOptions };
 
@@ -54,7 +54,8 @@ export class Pty {
   #fd: number;
 
   #handledClose: boolean = false;
-  #fdClosed: boolean = false;
+  #socketClosed: boolean = false;
+  #userFdDropped: boolean = false;
 
   #socket: ReadStream;
   read: Readable;
@@ -86,11 +87,11 @@ export class Pty {
 
     // catch end events
     const handleClose = async () => {
-      if (this.#fdClosed) {
+      if (this.#socketClosed) {
         return;
       }
 
-      this.#fdClosed = true;
+      this.#socketClosed = true;
 
       // must wait for fd close and exit result before calling real exit
       await readFinished;
@@ -126,7 +127,7 @@ export class Pty {
     };
 
     // we need this synthetic eof detector as the pty stream has no way
-    // of distinguishing the program existing vs the data being fully read
+    // of distinguishing the program exiting vs the data being fully read
     // this is injected on the rust side after the .wait on the child process
     // returns
     // more details: https://github.com/replit/ruspty/pull/93
@@ -136,11 +137,17 @@ export class Pty {
     this.#socket.on('error', handleError);
     this.#socket.once('end', markReadFinished);
     this.#socket.once('close', handleClose);
-    this.read.once('synthetic-eof', async () => {
+    this.read.once(EOF_EVENT, async () => {
       // even if the program accidentally emits our synthetic eof
       // we dont yank the user fd away from them until the program actually exits
       // (and drops its copy of the user fd)
       await exitResult;
+
+      if (this.#userFdDropped) {
+        return;
+      }
+
+      this.#userFdDropped = true;
       this.#pty.dropUserFd();
     });
   }
@@ -151,10 +158,14 @@ export class Pty {
     // end instead of destroy so that the user can read the last bits of data
     // and allow graceful close event to mark the fd as ended
     this.#socket.end();
+
+    if (!this.#userFdDropped) {
+      this.#pty.dropUserFd();
+    }
   }
 
   resize(size: Size) {
-    if (this.#handledClose || this.#fdClosed) {
+    if (this.#handledClose || this.#socketClosed) {
       return;
     }
 

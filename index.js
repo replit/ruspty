@@ -326,6 +326,7 @@ const {
   Operation,
   MAX_U16_VALUE,
   MIN_U16_VALUE,
+  getSyntheticEofSequence,
   ptyResize,
   setCloseOnExec,
   getCloseOnExec,
@@ -335,6 +336,7 @@ module.exports.Pty = Pty;
 module.exports.Operation = Operation;
 module.exports.MAX_U16_VALUE = MAX_U16_VALUE;
 module.exports.MIN_U16_VALUE = MIN_U16_VALUE;
+module.exports.getSyntheticEofSequence = getSyntheticEofSequence;
 module.exports.ptyResize = ptyResize;
 module.exports.setCloseOnExec = setCloseOnExec;
 module.exports.getCloseOnExec = getCloseOnExec;

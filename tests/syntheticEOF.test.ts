@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { SyntheticEOFDetector, SYNTHETIC_EOF } from '../syntheticEof';
+import {
+  SyntheticEOFDetector,
+  SYNTHETIC_EOF,
+  EOF_EVENT,
+} from '../syntheticEof';
 
 describe('sequence', () => {
   it('should have correct EOF sequence', () => {
@@ -23,7 +27,7 @@ describe('SyntheticEOFDetector', () => {
     onEOF = vi.fn();
 
     detector.on('data', onData);
-    detector.on('synthetic-eof', onEOF);
+    detector.on(EOF_EVENT, onEOF);
   });
 
   it('should handle EOF at the end of stream', async () => {
@@ -64,20 +68,24 @@ describe('SyntheticEOFDetector', () => {
     expect(onEOF).not.toHaveBeenCalled();
   });
 
-  it('should handle EOF split in multiple ways', async () => {
-    // Split after escape
+  it('should handle EOF split after escape', async () => {
     detector.write('\x1B');
     detector.write(']7878\x1B\\');
     detector.write('data1');
+    detector.end();
 
-    // Split in middle
+    expect(output.toString()).toBe('data1');
+    expect(onEOF).toHaveBeenCalledTimes(1);
+  });
+
+  it('should handle EOF split in the middle', async () => {
     detector.write('\x1B]78');
     detector.write('78\x1B\\');
     detector.write('data2');
     detector.end();
 
-    expect(output.toString()).toBe('data1data2');
-    expect(onEOF).toHaveBeenCalledTimes(2);
+    expect(output.toString()).toBe('data2');
+    expect(onEOF).toHaveBeenCalledTimes(1);
   });
 
   it('should not hold up data that isnt a prefix of EOF', async () => {
@@ -105,7 +113,7 @@ describe('SyntheticEOFDetector', () => {
     detector.on('data', (chunk) => {
       events.push({ type: 'data', data: chunk.toString() });
     });
-    detector.on('synthetic-eof', () => {
+    detector.on(EOF_EVENT, () => {
       events.push({ type: 'eof' });
     });
 

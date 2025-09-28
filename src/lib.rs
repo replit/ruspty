@@ -1,14 +1,14 @@
 use std::collections::HashMap;
-use std::fs::{write, File};
 use std::io::ErrorKind;
 use std::io::{Error, Write};
+use std::mem;
 use std::os::fd::{AsRawFd, OwnedFd};
 use std::os::fd::{FromRawFd, IntoRawFd, RawFd};
 use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
 use std::thread;
 
-use napi::bindgen_prelude::JsFunction;
+use napi::bindgen_prelude::{Buffer, JsFunction};
 use napi::threadsafe_function::{ErrorStrategy, ThreadsafeFunction, ThreadsafeFunctionCallMode};
 use napi::Status::GenericFailure;
 use napi::{self, Env};
@@ -38,8 +38,6 @@ pub enum Operation {
   Modify,
   Delete,
 }
-
-const SYNTHETIC_EOF: &[u8] = b"\x1B]7878\x1B\\";
 
 /// Sandboxing rules. Deleting / modifying a path with any of the prefixes is forbidden and will
 /// cause process termination.
@@ -88,6 +86,13 @@ struct Size {
 pub const MAX_U16_VALUE: u16 = u16::MAX;
 #[napi]
 pub const MIN_U16_VALUE: u16 = u16::MIN;
+
+const SYNTHETIC_EOF: &[u8] = b"\x1B]7878\x1B\\";
+
+#[napi]
+pub fn get_synthetic_eof_sequence() -> Buffer {
+  SYNTHETIC_EOF.into()
+}
 
 fn cast_to_napi_error(err: Errno) -> napi::Error {
   napi::Error::new(GenericFailure, err)
@@ -296,13 +301,9 @@ impl Pty {
 
       // by this point, child has closed its copy of the user_fd
       // lets inject our synthetic EOF OSC into the user_fd
-      unsafe {
-        libc::write(
-          raw_user_fd,
-          SYNTHETIC_EOF.as_ptr() as *const libc::c_void,
-          SYNTHETIC_EOF.len(),
-        );
-      }
+      let mut file = unsafe { std::fs::File::from_raw_fd(raw_user_fd) };
+      let _ = file.write_all(&SYNTHETIC_EOF); // ignore, we have a timeout on the nodejs side to handle if this write fails
+      mem::forget(file); // forget the file to avoid dropping it
 
       match wait_result {
         Ok(status) => {
