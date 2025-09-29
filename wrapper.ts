@@ -151,12 +151,6 @@ export class Pty {
       // we dont yank the user fd away from them until the program actually exits
       // (and drops its copy of the user fd)
       await exitResult;
-
-      if (this.#userFdDropped) {
-        return;
-      }
-
-      this.#userFdDropped = true;
       this.dropUserFd();
     });
   }

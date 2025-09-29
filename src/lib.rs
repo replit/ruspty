@@ -302,8 +302,9 @@ impl Pty {
 
       // by this point, child has closed its copy of the user_fd
       // lets inject our synthetic EOF OSC into the user_fd
+      // its ok to ignore the result here as we have a timeout on the nodejs side to handle if this write fails
       let mut file = unsafe { std::fs::File::from_raw_fd(raw_user_fd) };
-      let _ = file.write_all(&SYNTHETIC_EOF); // ignore, we have a timeout on the nodejs side to handle if this write fails
+      let _ = file.write_all(SYNTHETIC_EOF); // ignore, we have a timeout on the nodejs side to handle if this write fails
       mem::forget(file); // forget the file to avoid dropping it
 
       match wait_result {
