@@ -57,7 +57,7 @@ function getOpenFds(): FdRecord {
 }
 
 describe('PTY', { repeats: 500 }, () => {
-  test.only('spawns and exits', async () => {
+  test('spawns and exits', async () => {
     const oldFds = getOpenFds();
     const message = 'hello from a pty';
     let buffer = '';
