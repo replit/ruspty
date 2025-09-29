@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::fs::{write, File};
 use std::io::ErrorKind;
 use std::io::{Error, Write};
-use std::mem;
 use std::os::fd::{AsRawFd, OwnedFd};
 use std::os::fd::{FromRawFd, IntoRawFd, RawFd};
 use std::os::unix::process::CommandExt;
@@ -303,9 +302,7 @@ impl Pty {
       // by this point, child has closed its copy of the user_fd
       // lets inject our synthetic EOF OSC into the user_fd
       // its ok to ignore the result here as we have a timeout on the nodejs side to handle if this write fails
-      let mut file = unsafe { std::fs::File::from_raw_fd(raw_user_fd) };
-      let _ = file.write_all(SYNTHETIC_EOF); // ignore, we have a timeout on the nodejs side to handle if this write fails
-      mem::forget(file); // forget the file to avoid dropping it
+      let _ = write_syn_eof_to_fd(raw_user_fd);
 
       match wait_result {
         Ok(status) => {
@@ -454,6 +451,38 @@ fn set_nonblocking(fd: i32) -> Result<(), napi::Error> {
         GenericFailure,
         format!("fcntl F_SETFL: {}", err),
       ));
+    }
+  }
+  Ok(())
+}
+
+fn write_syn_eof_to_fd(fd: libc::c_int) -> std::io::Result<()> {
+  let mut remaining = SYNTHETIC_EOF;
+  while !remaining.is_empty() {
+    match unsafe {
+      libc::write(
+        fd,
+        remaining.as_ptr() as *const libc::c_void,
+        remaining.len(),
+      )
+    } {
+      -1 => {
+        let err = std::io::Error::last_os_error();
+        if err.kind() == std::io::ErrorKind::Interrupted {
+          continue;
+        }
+
+        return Err(err);
+      }
+      0 => {
+        return Err(std::io::Error::new(
+          std::io::ErrorKind::WriteZero,
+          "write returned 0",
+        ));
+      }
+      n => {
+        remaining = &remaining[n as usize..];
+      }
     }
   }
   Ok(())
