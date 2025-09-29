@@ -7,17 +7,14 @@ use std::os::fd::{FromRawFd, IntoRawFd, RawFd};
 use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
 use std::thread;
-use std::time::Duration;
 
-use backoff::backoff::Backoff;
-use backoff::ExponentialBackoffBuilder;
-use napi::bindgen_prelude::JsFunction;
+use napi::bindgen_prelude::{Buffer, JsFunction};
 use napi::threadsafe_function::{ErrorStrategy, ThreadsafeFunction, ThreadsafeFunctionCallMode};
 use napi::Status::GenericFailure;
 use napi::{self, Env};
 use nix::errno::Errno;
 use nix::fcntl::{fcntl, FcntlArg, FdFlag, OFlag};
-use nix::libc::{self, c_int, ioctl, FIONREAD, TIOCOUTQ, TIOCSCTTY, TIOCSWINSZ};
+use nix::libc::{self, c_int, TIOCSCTTY, TIOCSWINSZ};
 use nix::pty::{openpty, Winsize};
 use nix::sys::termios::{self, SetArg};
 
@@ -31,6 +28,7 @@ mod sandbox;
 #[allow(dead_code)]
 struct Pty {
   controller_fd: Option<OwnedFd>,
+  user_fd: Option<OwnedFd>,
   /// The pid of the forked process.
   pub pid: u32,
 }
@@ -89,61 +87,15 @@ pub const MAX_U16_VALUE: u16 = u16::MAX;
 #[napi]
 pub const MIN_U16_VALUE: u16 = u16::MIN;
 
-fn cast_to_napi_error(err: Errno) -> napi::Error {
-  napi::Error::new(GenericFailure, err)
+const SYNTHETIC_EOF: &[u8] = b"\x1B]7878\x1B\\";
+
+#[napi]
+pub fn get_synthetic_eof_sequence() -> Buffer {
+  SYNTHETIC_EOF.into()
 }
 
-// if the child process exits before the controller fd is fully read or the user fd is fully
-// flushed, we might accidentally end in a case where onExit is called but js hasn't had
-// the chance to fully read the controller fd
-// let's wait until the controller fd is fully read before we call onExit
-fn poll_pty_fds_until_read(controller_fd: RawFd, user_fd: RawFd) {
-  let mut backoff = ExponentialBackoffBuilder::default()
-    .with_initial_interval(Duration::from_millis(1))
-    .with_max_interval(Duration::from_millis(100))
-    .with_max_elapsed_time(Some(Duration::from_secs(1)))
-    .build();
-
-  loop {
-    // check both input and output queues for both FDs
-    let mut controller_inq: i32 = 0;
-    let mut controller_outq: i32 = 0;
-    let mut user_inq: i32 = 0;
-    let mut user_outq: i32 = 0;
-
-    // safe because we're passing valid file descriptors and properly sized integers
-    unsafe {
-      // check bytes waiting to be read (FIONREAD, equivalent to TIOCINQ on Linux)
-      if ioctl(controller_fd, FIONREAD, &mut controller_inq) == -1
-        || ioctl(user_fd, FIONREAD, &mut user_inq) == -1
-      {
-        // break if we can't read
-        break;
-      }
-
-      // check bytes waiting to be written (TIOCOUTQ)
-      if ioctl(controller_fd, TIOCOUTQ, &mut controller_outq) == -1
-        || ioctl(user_fd, TIOCOUTQ, &mut user_outq) == -1
-      {
-        // break if we can't read
-        break;
-      }
-    }
-
-    // if all queues are empty, we're done
-    if controller_inq == 0 && controller_outq == 0 && user_inq == 0 && user_outq == 0 {
-      break;
-    }
-
-    // apply backoff strategy
-    if let Some(d) = backoff.next_backoff() {
-      thread::sleep(d);
-      continue;
-    } else {
-      // we have exhausted our attempts
-      break;
-    }
-  }
+fn cast_to_napi_error(err: Errno) -> napi::Error {
+  napi::Error::new(GenericFailure, err)
 }
 
 #[napi]
@@ -347,9 +299,10 @@ impl Pty {
     thread::spawn(move || {
       let wait_result = child.wait();
 
-      // try to wait for the controller fd to be fully read
-      poll_pty_fds_until_read(raw_controller_fd, raw_user_fd);
-      drop(user_fd);
+      // by this point, child has closed its copy of the user_fd
+      // lets inject our synthetic EOF OSC into the user_fd
+      // its ok to ignore the result here as we have a timeout on the nodejs side to handle if this write fails
+      let _ = write_syn_eof_to_fd(raw_user_fd);
 
       match wait_result {
         Ok(status) => {
@@ -379,6 +332,7 @@ impl Pty {
 
     Ok(Pty {
       controller_fd: Some(controller_fd),
+      user_fd: Some(user_fd),
       pid,
     })
   }
@@ -388,7 +342,7 @@ impl Pty {
   /// descriptor.
   #[napi]
   #[allow(dead_code)]
-  pub fn take_fd(&mut self) -> Result<c_int, napi::Error> {
+  pub fn take_controller_fd(&mut self) -> Result<c_int, napi::Error> {
     if let Some(fd) = self.controller_fd.take() {
       Ok(fd.into_raw_fd())
     } else {
@@ -397,6 +351,15 @@ impl Pty {
         "fd failed: bad file descriptor (os error 9)",
       ))
     }
+  }
+
+  /// Closes the owned file descriptor for the PTY controller. The Nodejs side must call this
+  /// when it is done with the file descriptor to avoid leaking FDs.
+  #[napi]
+  #[allow(dead_code)]
+  pub fn drop_user_fd(&mut self) -> Result<(), napi::Error> {
+    self.user_fd.take();
+    Ok(())
   }
 }
 
@@ -488,6 +451,38 @@ fn set_nonblocking(fd: i32) -> Result<(), napi::Error> {
         GenericFailure,
         format!("fcntl F_SETFL: {}", err),
       ));
+    }
+  }
+  Ok(())
+}
+
+fn write_syn_eof_to_fd(fd: libc::c_int) -> std::io::Result<()> {
+  let mut remaining = SYNTHETIC_EOF;
+  while !remaining.is_empty() {
+    match unsafe {
+      libc::write(
+        fd,
+        remaining.as_ptr() as *const libc::c_void,
+        remaining.len(),
+      )
+    } {
+      -1 => {
+        let err = std::io::Error::last_os_error();
+        if err.kind() == std::io::ErrorKind::Interrupted {
+          continue;
+        }
+
+        return Err(err);
+      }
+      0 => {
+        return Err(std::io::Error::new(
+          std::io::ErrorKind::WriteZero,
+          "write returned 0",
+        ));
+      }
+      n => {
+        remaining = &remaining[n as usize..];
+      }
     }
   }
   Ok(())

@@ -45,6 +45,7 @@ export interface Size {
 }
 export const MAX_U16_VALUE: number;
 export const MIN_U16_VALUE: number;
+export declare function getSyntheticEofSequence(): Buffer;
 /** Resize the terminal. */
 export declare function ptyResize(fd: number, size: Size): void;
 /**
@@ -66,5 +67,10 @@ export declare class Pty {
    * once (it will error the second time). The caller is responsible for closing the file
    * descriptor.
    */
-  takeFd(): c_int;
+  takeControllerFd(): c_int;
+  /**
+   * Closes the owned file descriptor for the PTY controller. The Nodejs side must call this
+   * when it is done with the file descriptor to avoid leaking FDs.
+   */
+  dropUserFd(): void;
 }

@@ -1,4 +1,4 @@
-import type { Readable, Writable } from 'node:stream';
+import { type Readable, type Writable } from 'node:stream';
 import { ReadStream } from 'node:tty';
 import {
   Pty as RawPty,
@@ -15,6 +15,7 @@ import {
   type SandboxRule,
   type SandboxOptions,
 } from './index.js';
+import { EOF_EVENT, SyntheticEOFDetector } from './syntheticEof.js';
 
 export { Operation, type SandboxRule, type SandboxOptions, type PtyOptions };
 
@@ -53,17 +54,13 @@ export class Pty {
   #fd: number;
 
   #handledClose: boolean = false;
-  #fdClosed: boolean = false;
+  #socketClosed: boolean = false;
+  #userFdDropped: boolean = false;
+  #fdDropTimeout: ReturnType<typeof setTimeout> | null = null;
 
   #socket: ReadStream;
-
-  get read(): Readable {
-    return this.#socket;
-  }
-
-  get write(): Writable {
-    return this.#socket;
-  }
+  read: Readable;
+  write: Writable;
 
   constructor(options: PtyOptions) {
     const realExit = options.onExit;
@@ -77,36 +74,39 @@ export class Pty {
     let readFinished = new Promise<void>((resolve) => {
       markReadFinished = resolve;
     });
-    const mockedExit = (error: NodeJS.ErrnoException | null, code: number) => {
-      markExited({ error, code });
-    };
 
     // when pty exits, we should wait until the fd actually ends (end OR error)
     // before closing the pty
     // we use a mocked exit function to capture the exit result
     // and then call the real exit function after the fd is fully read
-    this.#pty = new RawPty({ ...options, onExit: mockedExit });
-    // Transfer ownership of the FD to us.
-    this.#fd = this.#pty.takeFd();
+    this.#pty = new RawPty({
+      ...options,
+      onExit: (error, code) => {
+        // give nodejs a max of 1s to read the fd before
+        // dropping the fd to avoid leaking it
+        this.#fdDropTimeout = setTimeout(() => {
+          this.dropUserFd();
+        }, 1000);
 
+        markExited({ error, code });
+      },
+    });
+    this.#fd = this.#pty.takeControllerFd();
     this.#socket = new ReadStream(this.#fd);
 
     // catch end events
     const handleClose = async () => {
-      if (this.#fdClosed) {
+      if (this.#socketClosed) {
         return;
       }
 
-      this.#fdClosed = true;
+      this.#socketClosed = true;
 
       // must wait for fd close and exit result before calling real exit
       await readFinished;
       const result = await exitResult;
       realExit(result.error, result.code);
     };
-
-    this.read.once('end', markReadFinished);
-    this.read.once('close', handleClose);
 
     // PTYs signal their done-ness with an EIO error. we therefore need to filter them out (as well as
     // cleaning up other spurious errors) so that the user doesn't need to handle them and be in
@@ -123,10 +123,10 @@ export class Pty {
           // EIO only happens when the child dies. It is therefore our only true signal that there
           // is nothing left to read and we can start tearing things down. If we hadn't received an
           // error so far, we are considered to be in good standing.
-          this.read.off('error', handleError);
+          this.#socket.off('error', handleError);
           // emit 'end' to signal no more data
           // this will trigger our 'end' handler which marks readFinished
-          this.read.emit('end');
+          this.#socket.emit('end');
           return;
         }
       }
@@ -135,7 +135,37 @@ export class Pty {
       throw err;
     };
 
-    this.read.on('error', handleError);
+    // we need this synthetic eof detector as the pty stream has no way
+    // of distinguishing the program exiting vs the data being fully read
+    // this is injected on the rust side after the .wait on the child process
+    // returns
+    // more details: https://github.com/replit/ruspty/pull/93
+    this.read = this.#socket.pipe(new SyntheticEOFDetector());
+    this.write = this.#socket;
+
+    this.#socket.on('error', handleError);
+    this.#socket.once('end', markReadFinished);
+    this.#socket.once('close', handleClose);
+    this.read.once(EOF_EVENT, async () => {
+      // even if the program accidentally emits our synthetic eof
+      // we dont yank the user fd away from them until the program actually exits
+      // (and drops its copy of the user fd)
+      await exitResult;
+      this.dropUserFd();
+    });
+  }
+
+  private dropUserFd() {
+    if (this.#userFdDropped) {
+      return;
+    }
+
+    if (this.#fdDropTimeout) {
+      clearTimeout(this.#fdDropTimeout);
+    }
+
+    this.#userFdDropped = true;
+    this.#pty.dropUserFd();
   }
 
   close() {
@@ -144,10 +174,11 @@ export class Pty {
     // end instead of destroy so that the user can read the last bits of data
     // and allow graceful close event to mark the fd as ended
     this.#socket.end();
+    this.dropUserFd();
   }
 
   resize(size: Size) {
-    if (this.#handledClose || this.#fdClosed) {
+    if (this.#handledClose || this.#socketClosed) {
       return;
     }
 
