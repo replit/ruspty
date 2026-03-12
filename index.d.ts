@@ -33,6 +33,7 @@ export interface PtyOptions {
   dir?: string;
   size?: Size;
   cgroupPath?: string;
+  newCgroupNamespace?: boolean;
   apparmorProfile?: string;
   interactive?: boolean;
   sandbox?: SandboxOptions;

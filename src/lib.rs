@@ -68,6 +68,7 @@ struct PtyOptions {
   pub dir: Option<String>,
   pub size: Option<Size>,
   pub cgroup_path: Option<String>,
+  pub new_cgroup_namespace: Option<bool>,
   pub apparmor_profile: Option<String>,
   pub interactive: Option<bool>,
   pub sandbox: Option<SandboxOptions>,
@@ -124,6 +125,22 @@ impl Pty {
       return Err(napi::Error::new(
         napi::Status::GenericFailure,
         "apparmor is only supported on Linux",
+      ));
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    if opts.new_cgroup_namespace.unwrap_or(false) {
+      return Err(napi::Error::new(
+        napi::Status::GenericFailure,
+        "new_cgroup_namespace is only supported on Linux",
+      ));
+    }
+
+    #[cfg(target_os = "linux")]
+    if opts.new_cgroup_namespace.unwrap_or(false) && opts.cgroup_path.is_none() {
+      return Err(napi::Error::new(
+        napi::Status::GenericFailure,
+        "cannot enable new_cgroup_namespace without cgroup_path",
       ));
     }
 
@@ -188,9 +205,18 @@ impl Pty {
         #[cfg(target_os = "linux")]
         if let Some(cgroup_path) = &opts.cgroup_path {
           let pid = libc::getpid();
-          let cgroup_path = format!("{}/cgroup.procs", cgroup_path);
-          let mut cgroup_file = File::create(cgroup_path)?;
+          let cgroup_procs = format!("{}/cgroup.procs", cgroup_path);
+          let mut cgroup_file = File::create(cgroup_procs)?;
           cgroup_file.write_all(format!("{}", pid).as_bytes())?;
+
+          // Unshare the cgroup namespace, rooting it at the scope we just joined.
+          // This prevents the child from seeing or writing to any cgroup outside its own subtree.
+          if opts.new_cgroup_namespace.unwrap_or(false) {
+            let ret = libc::unshare(libc::CLONE_NEWCGROUP);
+            if ret != 0 {
+              return Err(Error::last_os_error());
+            }
+          }
 
           // also set the sandbox if specified. It's important for it to be in a cgroup so that we don't
           // accidentally leak processes if something went wrong.
