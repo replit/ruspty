@@ -38,4 +38,4 @@ Following ["Publish It" section from `napi-rs` docs](https://napi.rs/docs/introd
 2. `npm version [major|minor|patch]`
 3. Send that as a Pull Request to GitHub. Ensure that the commit message consisting **only** of `x.y.z` - this is how the CI decides to publish to `npm`!
 
-`NPM_TOKEN` is part of the repo secrets, generated [like this](https://httptoolkit.com/blog/automatic-npm-publish-gha/).
+Configure npm trusted publishing for `replit/ruspty` with the workflow filename `CI.yml` before merging a version bump PR. The publish job now uses GitHub OIDC, so `NPM_TOKEN` is no longer required.

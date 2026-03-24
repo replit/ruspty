@@ -5,8 +5,7 @@ env:
   MACOSX_DEPLOYMENT_TARGET: '10.13'
 
 permissions:
-  contents: write
-  id-token: write
+  contents: read
 'on':
   push:
     branches:
@@ -138,12 +137,16 @@ jobs:
     if: github.ref == 'refs/heads/main'
     needs:
       - test
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
       - name: Setup node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
+          registry-url: https://registry.npmjs.org
       - name: Install dependencies
         run: npm ci
       - name: Download all artifacts
@@ -158,10 +161,4 @@ jobs:
         run: ls -R ./npm
         shell: bash
       - name: Publish
-        run: |
-          npm config set provenance true
-          echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" >> ~/.npmrc
-          npm publish --access public
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public
