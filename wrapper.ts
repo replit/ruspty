@@ -9,6 +9,7 @@ import {
   MAX_U16_VALUE,
   MIN_U16_VALUE,
   clearAmbientCapabilities as rawClearAmbientCapabilities,
+  clearProcessCapabilities as rawClearProcessCapabilities,
 } from './index.js';
 import {
   type PtyOptions,
@@ -242,3 +243,4 @@ export const setCloseOnExec = rawSetCloseOnExec;
 export const getCloseOnExec = rawGetCloseOnExec;
 
 export const clearAmbientCapabilities = rawClearAmbientCapabilities;
+export const clearProcessCapabilities = rawClearProcessCapabilities;

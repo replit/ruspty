@@ -416,21 +416,6 @@ fn apply_process_credentials(credentials: &ProcessCredentials) -> Result<(), Err
   const SECBIT_NOROOT_LOCKED: libc::c_ulong = 1 << 1;
   const SECBIT_NO_SETUID_FIXUP: libc::c_ulong = 1 << 2;
   const SECBIT_NO_SETUID_FIXUP_LOCKED: libc::c_ulong = 1 << 3;
-  const LINUX_CAPABILITY_VERSION_3: u32 = 0x2008_0522;
-
-  #[repr(C)]
-  struct CapabilityHeader {
-    version: u32,
-    pid: i32,
-  }
-
-  #[repr(C)]
-  struct CapabilityData {
-    effective: u32,
-    permitted: u32,
-    inheritable: u32,
-  }
-
   let secure_bits =
     SECBIT_NOROOT | SECBIT_NOROOT_LOCKED | SECBIT_NO_SETUID_FIXUP | SECBIT_NO_SETUID_FIXUP_LOCKED;
   if unsafe { libc::prctl(libc::PR_SET_SECUREBITS, secure_bits) } != 0 {
@@ -447,6 +432,30 @@ fn apply_process_credentials(credentials: &ProcessCredentials) -> Result<(), Err
   }
   if unsafe { libc::setresuid(credentials.uid, credentials.uid, credentials.uid) } != 0 {
     return Err(Error::last_os_error());
+  }
+
+  clear_process_capabilities_inner()?;
+  if unsafe { libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) } != 0 {
+    return Err(Error::last_os_error());
+  }
+  Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn clear_process_capabilities_inner() -> Result<(), Error> {
+  const LINUX_CAPABILITY_VERSION_3: u32 = 0x2008_0522;
+
+  #[repr(C)]
+  struct CapabilityHeader {
+    version: u32,
+    pid: i32,
+  }
+
+  #[repr(C)]
+  struct CapabilityData {
+    effective: u32,
+    permitted: u32,
+    inheritable: u32,
   }
 
   let header = CapabilityHeader {
@@ -466,9 +475,6 @@ fn apply_process_credentials(credentials: &ProcessCredentials) -> Result<(), Err
     },
   ];
   if unsafe { libc::syscall(libc::SYS_capset, &header, data.as_ptr()) } != 0 {
-    return Err(Error::last_os_error());
-  }
-  if unsafe { libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) } != 0 {
     return Err(Error::last_os_error());
   }
   Ok(())
@@ -495,6 +501,16 @@ fn clear_ambient_capabilities_inner() -> Result<(), Error> {
 pub fn clear_ambient_capabilities() -> Result<(), napi::Error> {
   #[cfg(target_os = "linux")]
   clear_ambient_capabilities_inner().map_err(|err| napi::Error::from_reason(err.to_string()))?;
+  Ok(())
+}
+
+#[napi]
+pub fn clear_process_capabilities() -> Result<(), napi::Error> {
+  #[cfg(target_os = "linux")]
+  {
+    clear_ambient_capabilities_inner().map_err(|err| napi::Error::from_reason(err.to_string()))?;
+    clear_process_capabilities_inner().map_err(|err| napi::Error::from_reason(err.to_string()))?;
+  }
   Ok(())
 }
 
