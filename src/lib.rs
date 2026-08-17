@@ -61,9 +61,9 @@ pub struct SandboxOptions {
 
 #[napi(object)]
 pub struct ProcessCredentials {
-  pub uid: u32,
-  pub gid: u32,
-  pub supplementary_gids: Vec<u32>,
+  pub uid: f64,
+  pub gid: f64,
+  pub supplementary_gids: Vec<f64>,
 }
 
 /// The options that can be passed to the constructor of Pty.
@@ -167,6 +167,13 @@ impl Pty {
         "cannot enable sandbox without cgroup",
       ));
     }
+
+    #[cfg(target_os = "linux")]
+    let credentials = opts
+      .credentials
+      .as_ref()
+      .map(ValidatedProcessCredentials::try_from)
+      .transpose()?;
 
     let size = opts.size.unwrap_or(Size { cols: 80, rows: 24 });
     let window_size = Winsize {
@@ -314,7 +321,7 @@ impl Pty {
         libc::signal(libc::SIGALRM, libc::SIG_DFL);
 
         #[cfg(target_os = "linux")]
-        if let Some(credentials) = &opts.credentials {
+        if let Some(credentials) = &credentials {
           apply_process_credentials(credentials)?;
         }
 
@@ -411,7 +418,66 @@ impl Pty {
 }
 
 #[cfg(target_os = "linux")]
-fn apply_process_credentials(credentials: &ProcessCredentials) -> Result<(), Error> {
+struct ValidatedProcessCredentials {
+  uid: libc::uid_t,
+  gid: libc::gid_t,
+  supplementary_gids: Vec<libc::gid_t>,
+}
+
+#[cfg(target_os = "linux")]
+impl TryFrom<&ProcessCredentials> for ValidatedProcessCredentials {
+  type Error = napi::Error;
+
+  fn try_from(credentials: &ProcessCredentials) -> Result<Self, Self::Error> {
+    Ok(Self {
+      uid: validate_process_id(credentials.uid, "uid")?,
+      gid: validate_process_id(credentials.gid, "gid")?,
+      supplementary_gids: credentials
+        .supplementary_gids
+        .iter()
+        .map(|id| validate_process_id(*id, "supplementaryGids"))
+        .collect::<Result<_, _>>()?,
+    })
+  }
+}
+
+#[cfg(target_os = "linux")]
+fn validate_process_id(value: f64, field: &str) -> Result<u32, napi::Error> {
+  if !value.is_finite() || value < 0.0 || value.fract() != 0.0 || value >= u32::MAX as f64 {
+    return Err(napi::Error::new(
+      napi::Status::InvalidArg,
+      format!(
+        "credentials.{field} must be an integer between 0 and {}",
+        u32::MAX - 1
+      ),
+    ));
+  }
+  Ok(value as u32)
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod process_credentials_tests {
+  use super::validate_process_id;
+
+  #[test]
+  fn accepts_linux_id_range() {
+    assert_eq!(validate_process_id(0.0, "uid").unwrap(), 0);
+    assert_eq!(
+      validate_process_id((u32::MAX - 1) as f64, "uid").unwrap(),
+      u32::MAX - 1
+    );
+  }
+
+  #[test]
+  fn rejects_lossy_or_sentinel_ids() {
+    for value in [-1.0, 1.5, f64::INFINITY, f64::NAN, u32::MAX as f64] {
+      assert!(validate_process_id(value, "uid").is_err());
+    }
+  }
+}
+
+#[cfg(target_os = "linux")]
+fn apply_process_credentials(credentials: &ValidatedProcessCredentials) -> Result<(), Error> {
   const SECBIT_NOROOT: libc::c_ulong = 1 << 0;
   const SECBIT_NOROOT_LOCKED: libc::c_ulong = 1 << 1;
   const SECBIT_NO_SETUID_FIXUP: libc::c_ulong = 1 << 2;
@@ -423,8 +489,13 @@ fn apply_process_credentials(credentials: &ProcessCredentials) -> Result<(), Err
   }
   clear_ambient_capabilities_inner()?;
 
-  let supplementary_gids: Vec<libc::gid_t> = credentials.supplementary_gids.clone();
-  if unsafe { libc::setgroups(supplementary_gids.len(), supplementary_gids.as_ptr()) } != 0 {
+  if unsafe {
+    libc::setgroups(
+      credentials.supplementary_gids.len(),
+      credentials.supplementary_gids.as_ptr(),
+    )
+  } != 0
+  {
     return Err(Error::last_os_error());
   }
   if unsafe { libc::setresgid(credentials.gid, credentials.gid, credentials.gid) } != 0 {
