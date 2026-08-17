@@ -25,6 +25,11 @@ export interface SandboxRule {
 export interface SandboxOptions {
   rules: Array<SandboxRule>;
 }
+export interface ProcessCredentials {
+  uid: number;
+  gid: number;
+  supplementaryGids: Array<number>;
+}
 /** The options that can be passed to the constructor of Pty. */
 export interface PtyOptions {
   command: string;
@@ -37,6 +42,7 @@ export interface PtyOptions {
   apparmorProfile?: string;
   interactive?: boolean;
   sandbox?: SandboxOptions;
+  credentials?: ProcessCredentials;
   onExit: (err: null | Error, exitCode: number) => void;
 }
 /** A size struct to pass to resize. */
@@ -59,6 +65,7 @@ export declare function setCloseOnExec(fd: number, closeOnExec: boolean): void;
  *_CLOEXEC` under the covers.
  */
 export declare function getCloseOnExec(fd: number): boolean;
+export declare function clearAmbientCapabilities(): void;
 export declare class Pty {
   /** The pid of the forked process. */
   pid: number;

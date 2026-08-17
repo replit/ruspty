@@ -8,16 +8,24 @@ import {
   ptyResize,
   MAX_U16_VALUE,
   MIN_U16_VALUE,
+  clearAmbientCapabilities as rawClearAmbientCapabilities,
 } from './index.js';
 import {
   type PtyOptions,
   Operation,
   type SandboxRule,
   type SandboxOptions,
+  type ProcessCredentials,
 } from './index.js';
 import { EOF_EVENT, SyntheticEOFDetector } from './syntheticEof.js';
 
-export { Operation, type SandboxRule, type SandboxOptions, type PtyOptions };
+export {
+  Operation,
+  type SandboxRule,
+  type SandboxOptions,
+  type ProcessCredentials,
+  type PtyOptions,
+};
 
 type ExitResult = {
   error: NodeJS.ErrnoException | null;
@@ -232,3 +240,5 @@ export const setCloseOnExec = rawSetCloseOnExec;
  * FD_CLOEXEC` under the covers.
  */
 export const getCloseOnExec = rawGetCloseOnExec;
+
+export const clearAmbientCapabilities = rawClearAmbientCapabilities;

@@ -59,6 +59,13 @@ pub struct SandboxOptions {
   pub rules: Vec<SandboxRule>,
 }
 
+#[napi(object)]
+pub struct ProcessCredentials {
+  pub uid: u32,
+  pub gid: u32,
+  pub supplementary_gids: Vec<u32>,
+}
+
 /// The options that can be passed to the constructor of Pty.
 #[napi(object)]
 struct PtyOptions {
@@ -72,6 +79,7 @@ struct PtyOptions {
   pub apparmor_profile: Option<String>,
   pub interactive: Option<bool>,
   pub sandbox: Option<SandboxOptions>,
+  pub credentials: Option<ProcessCredentials>,
   #[napi(ts_type = "(err: null | Error, exitCode: number) => void")]
   pub on_exit: JsFunction,
 }
@@ -133,6 +141,14 @@ impl Pty {
       return Err(napi::Error::new(
         napi::Status::GenericFailure,
         "new_cgroup_namespace is only supported on Linux",
+      ));
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    if opts.credentials.is_some() {
+      return Err(napi::Error::new(
+        napi::Status::GenericFailure,
+        "credentials are only supported on Linux",
       ));
     }
 
@@ -297,6 +313,11 @@ impl Pty {
         libc::signal(libc::SIGTERM, libc::SIG_DFL);
         libc::signal(libc::SIGALRM, libc::SIG_DFL);
 
+        #[cfg(target_os = "linux")]
+        if let Some(credentials) = &opts.credentials {
+          apply_process_credentials(credentials)?;
+        }
+
         Ok(())
       });
     }
@@ -387,6 +408,94 @@ impl Pty {
     self.user_fd.take();
     Ok(())
   }
+}
+
+#[cfg(target_os = "linux")]
+fn apply_process_credentials(credentials: &ProcessCredentials) -> Result<(), Error> {
+  const SECBIT_NOROOT: libc::c_ulong = 1 << 0;
+  const SECBIT_NOROOT_LOCKED: libc::c_ulong = 1 << 1;
+  const SECBIT_NO_SETUID_FIXUP: libc::c_ulong = 1 << 2;
+  const SECBIT_NO_SETUID_FIXUP_LOCKED: libc::c_ulong = 1 << 3;
+  const LINUX_CAPABILITY_VERSION_3: u32 = 0x2008_0522;
+
+  #[repr(C)]
+  struct CapabilityHeader {
+    version: u32,
+    pid: i32,
+  }
+
+  #[repr(C)]
+  struct CapabilityData {
+    effective: u32,
+    permitted: u32,
+    inheritable: u32,
+  }
+
+  let secure_bits =
+    SECBIT_NOROOT | SECBIT_NOROOT_LOCKED | SECBIT_NO_SETUID_FIXUP | SECBIT_NO_SETUID_FIXUP_LOCKED;
+  if unsafe { libc::prctl(libc::PR_SET_SECUREBITS, secure_bits) } != 0 {
+    return Err(Error::last_os_error());
+  }
+  clear_ambient_capabilities_inner()?;
+
+  let supplementary_gids: Vec<libc::gid_t> = credentials.supplementary_gids.clone();
+  if unsafe { libc::setgroups(supplementary_gids.len(), supplementary_gids.as_ptr()) } != 0 {
+    return Err(Error::last_os_error());
+  }
+  if unsafe { libc::setresgid(credentials.gid, credentials.gid, credentials.gid) } != 0 {
+    return Err(Error::last_os_error());
+  }
+  if unsafe { libc::setresuid(credentials.uid, credentials.uid, credentials.uid) } != 0 {
+    return Err(Error::last_os_error());
+  }
+
+  let header = CapabilityHeader {
+    version: LINUX_CAPABILITY_VERSION_3,
+    pid: 0,
+  };
+  let data = [
+    CapabilityData {
+      effective: 0,
+      permitted: 0,
+      inheritable: 0,
+    },
+    CapabilityData {
+      effective: 0,
+      permitted: 0,
+      inheritable: 0,
+    },
+  ];
+  if unsafe { libc::syscall(libc::SYS_capset, &header, data.as_ptr()) } != 0 {
+    return Err(Error::last_os_error());
+  }
+  if unsafe { libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) } != 0 {
+    return Err(Error::last_os_error());
+  }
+  Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn clear_ambient_capabilities_inner() -> Result<(), Error> {
+  if unsafe {
+    libc::prctl(
+      libc::PR_CAP_AMBIENT,
+      libc::PR_CAP_AMBIENT_CLEAR_ALL,
+      0,
+      0,
+      0,
+    )
+  } != 0
+  {
+    return Err(Error::last_os_error());
+  }
+  Ok(())
+}
+
+#[napi]
+pub fn clear_ambient_capabilities() -> Result<(), napi::Error> {
+  #[cfg(target_os = "linux")]
+  clear_ambient_capabilities_inner().map_err(|err| napi::Error::from_reason(err.to_string()))?;
+  Ok(())
 }
 
 /// Resize the terminal.
