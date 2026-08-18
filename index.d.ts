@@ -66,6 +66,7 @@ export declare function setCloseOnExec(fd: number, closeOnExec: boolean): void;
  */
 export declare function getCloseOnExec(fd: number): boolean;
 export declare function clearAmbientCapabilities(): void;
+export declare function raiseAmbientCapabilities(capabilities: Array<number>): void;
 export declare function clearProcessCapabilities(): void;
 export declare class Pty {
   /** The pid of the forked process. */

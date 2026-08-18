@@ -9,6 +9,7 @@ import {
   MAX_U16_VALUE,
   MIN_U16_VALUE,
   clearAmbientCapabilities as rawClearAmbientCapabilities,
+  raiseAmbientCapabilities as rawRaiseAmbientCapabilities,
   clearProcessCapabilities as rawClearProcessCapabilities,
 } from './index.js';
 import {
@@ -243,4 +244,5 @@ export const setCloseOnExec = rawSetCloseOnExec;
 export const getCloseOnExec = rawGetCloseOnExec;
 
 export const clearAmbientCapabilities = rawClearAmbientCapabilities;
+export const raiseAmbientCapabilities = rawRaiseAmbientCapabilities;
 export const clearProcessCapabilities = rawClearProcessCapabilities;

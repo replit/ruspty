@@ -330,6 +330,9 @@ const {
   ptyResize,
   setCloseOnExec,
   getCloseOnExec,
+  clearAmbientCapabilities,
+  raiseAmbientCapabilities,
+  clearProcessCapabilities,
 } = nativeBinding;
 
 module.exports.Pty = Pty;
@@ -340,3 +343,6 @@ module.exports.getSyntheticEofSequence = getSyntheticEofSequence;
 module.exports.ptyResize = ptyResize;
 module.exports.setCloseOnExec = setCloseOnExec;
 module.exports.getCloseOnExec = getCloseOnExec;
+module.exports.clearAmbientCapabilities = clearAmbientCapabilities;
+module.exports.raiseAmbientCapabilities = raiseAmbientCapabilities;
+module.exports.clearProcessCapabilities = clearProcessCapabilities;

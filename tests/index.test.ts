@@ -931,3 +931,34 @@ describe('setCloseOnExec', () => {
     setCloseOnExec(0, originalFlag);
   });
 });
+
+const testAsLinuxRoot =
+  process.platform === 'linux' && process.getuid?.() === 0 ? test : test.skip;
+
+describe('process credentials', () => {
+  testAsLinuxRoot('preserves normal guest-root privileges', async () => {
+    let output = '';
+    const onExit = vi.fn();
+    const pty = new Pty({
+      command: 'sh',
+      args: [
+        '-c',
+        'grep -E "^(CapEff|CapBnd|NoNewPrivs):" /proc/self/status',
+      ],
+      credentials: { uid: 0, gid: 0, supplementaryGids: [] },
+      onExit,
+    });
+    pty.read.on('data', (data) => {
+      output += data.toString();
+    });
+
+    await vi.waitFor(() => expect(onExit).toHaveBeenCalledTimes(1));
+    expect(onExit).toHaveBeenCalledWith(null, 0);
+    expect(output).toContain('NoNewPrivs:\t0');
+    const effective = output.match(/CapEff:\s*([0-9a-f]+)/)?.[1];
+    const bounding = output.match(/CapBnd:\s*([0-9a-f]+)/)?.[1];
+    expect(effective).toBeTruthy();
+    expect(effective).not.toBe('0000000000000000');
+    expect(effective).toBe(bounding);
+  });
+});

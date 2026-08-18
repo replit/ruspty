@@ -455,9 +455,28 @@ fn validate_process_id(value: f64, field: &str) -> Result<u32, napi::Error> {
   Ok(value as u32)
 }
 
+#[cfg(target_os = "linux")]
+fn validate_capability(value: f64) -> Result<u32, napi::Error> {
+  if !value.is_finite() || value < 0.0 || value.fract() != 0.0 || value > 63.0 {
+    return Err(napi::Error::new(
+      napi::Status::InvalidArg,
+      "capabilities must contain integers between 0 and 63",
+    ));
+  }
+
+  let capability = value as u32;
+  if unsafe { libc::prctl(libc::PR_CAPBSET_READ, capability as libc::c_ulong, 0, 0, 0) } < 0 {
+    return Err(napi::Error::new(
+      napi::Status::InvalidArg,
+      format!("capability {capability} is not supported by this kernel"),
+    ));
+  }
+  Ok(capability)
+}
+
 #[cfg(all(test, target_os = "linux"))]
 mod process_credentials_tests {
-  use super::validate_process_id;
+  use super::{validate_capability, validate_process_id};
 
   #[test]
   fn accepts_linux_id_range() {
@@ -474,19 +493,17 @@ mod process_credentials_tests {
       assert!(validate_process_id(value, "uid").is_err());
     }
   }
+
+  #[test]
+  fn rejects_invalid_capabilities() {
+    for value in [-1.0, 1.5, f64::INFINITY, f64::NAN, 64.0] {
+      assert!(validate_capability(value).is_err());
+    }
+  }
 }
 
 #[cfg(target_os = "linux")]
 fn apply_process_credentials(credentials: &ValidatedProcessCredentials) -> Result<(), Error> {
-  const SECBIT_NOROOT: libc::c_ulong = 1 << 0;
-  const SECBIT_NOROOT_LOCKED: libc::c_ulong = 1 << 1;
-  const SECBIT_NO_SETUID_FIXUP: libc::c_ulong = 1 << 2;
-  const SECBIT_NO_SETUID_FIXUP_LOCKED: libc::c_ulong = 1 << 3;
-  let secure_bits =
-    SECBIT_NOROOT | SECBIT_NOROOT_LOCKED | SECBIT_NO_SETUID_FIXUP | SECBIT_NO_SETUID_FIXUP_LOCKED;
-  if unsafe { libc::prctl(libc::PR_SET_SECUREBITS, secure_bits) } != 0 {
-    return Err(Error::last_os_error());
-  }
   clear_ambient_capabilities_inner()?;
 
   if unsafe {
@@ -506,9 +523,6 @@ fn apply_process_credentials(credentials: &ValidatedProcessCredentials) -> Resul
   }
 
   clear_process_capabilities_inner()?;
-  if unsafe { libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) } != 0 {
-    return Err(Error::last_os_error());
-  }
   Ok(())
 }
 
@@ -552,6 +566,61 @@ fn clear_process_capabilities_inner() -> Result<(), Error> {
 }
 
 #[cfg(target_os = "linux")]
+fn raise_ambient_capabilities_inner(capabilities: &[u32]) -> Result<(), Error> {
+  let mut raised = Vec::with_capacity(capabilities.len());
+  for capability in capabilities {
+    let is_set = unsafe {
+      libc::prctl(
+        libc::PR_CAP_AMBIENT,
+        libc::PR_CAP_AMBIENT_IS_SET,
+        *capability as libc::c_ulong,
+        0,
+        0,
+      )
+    };
+    if is_set < 0 {
+      let error = Error::last_os_error();
+      lower_ambient_capabilities(&raised);
+      return Err(error);
+    }
+    if is_set == 1 {
+      continue;
+    }
+    if unsafe {
+      libc::prctl(
+        libc::PR_CAP_AMBIENT,
+        libc::PR_CAP_AMBIENT_RAISE,
+        *capability as libc::c_ulong,
+        0,
+        0,
+      )
+    } != 0
+    {
+      let error = Error::last_os_error();
+      lower_ambient_capabilities(&raised);
+      return Err(error);
+    }
+    raised.push(*capability);
+  }
+  Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn lower_ambient_capabilities(capabilities: &[u32]) {
+  for capability in capabilities {
+    unsafe {
+      libc::prctl(
+        libc::PR_CAP_AMBIENT,
+        libc::PR_CAP_AMBIENT_LOWER,
+        *capability as libc::c_ulong,
+        0,
+        0,
+      )
+    };
+  }
+}
+
+#[cfg(target_os = "linux")]
 fn clear_ambient_capabilities_inner() -> Result<(), Error> {
   if unsafe {
     libc::prctl(
@@ -572,6 +641,20 @@ fn clear_ambient_capabilities_inner() -> Result<(), Error> {
 pub fn clear_ambient_capabilities() -> Result<(), napi::Error> {
   #[cfg(target_os = "linux")]
   clear_ambient_capabilities_inner().map_err(|err| napi::Error::from_reason(err.to_string()))?;
+  Ok(())
+}
+
+#[napi]
+pub fn raise_ambient_capabilities(capabilities: Vec<f64>) -> Result<(), napi::Error> {
+  #[cfg(target_os = "linux")]
+  {
+    let capabilities = capabilities
+      .into_iter()
+      .map(validate_capability)
+      .collect::<Result<Vec<_>, _>>()?;
+    raise_ambient_capabilities_inner(&capabilities)
+      .map_err(|err| napi::Error::from_reason(err.to_string()))?;
+  }
   Ok(())
 }
 
