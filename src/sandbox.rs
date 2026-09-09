@@ -97,13 +97,13 @@ fn get_syscall_targets(pid: Pid) -> Result<Vec<SyscallTarget>> {
   }
   match Sysno::new(regs.orig_rax as usize) {
     Some(sysno @ Sysno::open) => {
-      let mut path = get_cwd(pid).context("open: get cwd")?;
-      path.push(read_path(pid, regs.rdi as u64).context("open: read path")?);
-      debug!(pid:? = pid, filename:?= path, sysno:?=sysno; "syscall");
       let accmode = (regs.rsi & OFlag::O_ACCMODE.bits() as u64) as c_int;
       if accmode != OFlag::O_WRONLY.bits() && accmode != OFlag::O_RDWR.bits() {
         return Ok(vec![]);
       }
+      let mut path = get_cwd(pid).context("open: get cwd")?;
+      path.push(read_path(pid, regs.rdi as u64).context("open: read path")?);
+      debug!(pid:? = pid, filename:?= path, sysno:?=sysno; "syscall");
       Ok(vec![SyscallTarget {
         operation: Operation::Modify,
         sysno,
@@ -191,6 +191,10 @@ fn get_syscall_targets(pid: Pid) -> Result<Vec<SyscallTarget>> {
       }])
     }
     Some(sysno @ Sysno::openat) => {
+      let accmode = (regs.rdx & OFlag::O_ACCMODE.bits() as u64) as c_int;
+      if accmode != OFlag::O_WRONLY.bits() && accmode != OFlag::O_RDWR.bits() {
+        return Ok(vec![]);
+      }
       let mut path = match regs.rdi {
         AT_FDCWD64 | AT_FDCWD => get_cwd(pid).context("openat: get cwd")?,
         dirfd => get_fd_path(pid, dirfd as i32)
@@ -198,10 +202,6 @@ fn get_syscall_targets(pid: Pid) -> Result<Vec<SyscallTarget>> {
       };
       path.push(read_path(pid, regs.rsi as u64)?);
       debug!(pid:? = pid, filename:?= path, sysno:?=sysno; "syscall");
-      let accmode = (regs.rdx & OFlag::O_ACCMODE.bits() as u64) as c_int;
-      if accmode != OFlag::O_WRONLY.bits() && accmode != OFlag::O_RDWR.bits() {
-        return Ok(vec![]);
-      }
       Ok(vec![SyscallTarget {
         operation: Operation::Modify,
         sysno,
@@ -313,16 +313,16 @@ fn get_syscall_targets(pid: Pid) -> Result<Vec<SyscallTarget>> {
       ])
     }
     Some(sysno @ Sysno::openat2) => {
+      let accmode = (regs.rdx & OFlag::O_ACCMODE.bits() as u64) as c_int;
+      if accmode != OFlag::O_WRONLY.bits() && accmode != OFlag::O_RDWR.bits() {
+        return Ok(vec![]);
+      }
       let mut path = match regs.rdi {
         AT_FDCWD64 | AT_FDCWD => get_cwd(pid).context("openat2: get cwd")?,
         dirfd => get_fd_path(pid, dirfd as i32)
           .with_context(|| format!("openat2: get fd path {:x}", regs.rdi))?,
       };
       path.push(read_path(pid, regs.rsi as u64)?);
-      let accmode = (regs.rdx & OFlag::O_ACCMODE.bits() as u64) as c_int;
-      if accmode != OFlag::O_WRONLY.bits() && accmode != OFlag::O_RDWR.bits() {
-        return Ok(vec![]);
-      }
       debug!(pid:? = pid, filename:?= path, sysno:?=sysno; "syscall");
       Ok(vec![SyscallTarget {
         operation: Operation::Modify,
@@ -835,6 +835,24 @@ mod tests {
     assert_eq!(
       test_install_sandbox(exec_hook, tmp_dir.path()).expect("test_install_sandbox"),
       (0, "hello\n".to_string(), "".to_string())
+    );
+  }
+
+  #[test]
+  fn it_does_not_resolve_paths_for_read_only_opens() {
+    fn read_relative_path_while_non_dumpable() -> ! {
+      let result = unsafe { libc::prctl(libc::PR_SET_DUMPABLE, 0) };
+      assert_eq!(result, 0);
+      File::open("Cargo.toml").expect("open Cargo.toml");
+      unsafe { libc::_exit(0) };
+    }
+
+    let tmp_dir =
+      TempDir::with_prefix("pid2sandbox-").expect("Failed to create temporary directory");
+    assert_eq!(
+      test_install_sandbox(read_relative_path_while_non_dumpable, tmp_dir.path())
+        .expect("test_install_sandbox"),
+      (0, "".to_string(), "".to_string())
     );
   }
 
