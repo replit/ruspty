@@ -69,6 +69,7 @@ struct PtyOptions {
   pub size: Option<Size>,
   pub cgroup_path: Option<String>,
   pub new_cgroup_namespace: Option<bool>,
+  pub no_new_privileges: Option<bool>,
   pub apparmor_profile: Option<String>,
   pub interactive: Option<bool>,
   pub sandbox: Option<SandboxOptions>,
@@ -133,6 +134,14 @@ impl Pty {
       return Err(napi::Error::new(
         napi::Status::GenericFailure,
         "new_cgroup_namespace is only supported on Linux",
+      ));
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    if opts.no_new_privileges.unwrap_or(false) {
+      return Err(napi::Error::new(
+        napi::Status::GenericFailure,
+        "no_new_privileges is only supported on Linux",
       ));
     }
 
@@ -282,6 +291,13 @@ impl Pty {
         libc::signal(libc::SIGQUIT, libc::SIG_DFL);
         libc::signal(libc::SIGTERM, libc::SIG_DFL);
         libc::signal(libc::SIGALRM, libc::SIG_DFL);
+
+        #[cfg(target_os = "linux")]
+        if opts.no_new_privileges.unwrap_or(false)
+          && libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0
+        {
+          return Err(Error::last_os_error());
+        }
 
         Ok(())
       });

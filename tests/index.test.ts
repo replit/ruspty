@@ -160,6 +160,25 @@ describe('PTY', { repeats: 500 }, () => {
     await vi.waitFor(() => expect(getOpenFds()).toStrictEqual(oldFds));
   });
 
+  testSkipOnDarwin('sets no new privileges before exec', async () => {
+    let buffer = '';
+    const onExit = vi.fn();
+    const pty = new Pty({
+      command: 'sh',
+      args: ['-c', "awk '/^NoNewPrivs:/ { print $2 }' /proc/self/status"],
+      noNewPrivileges: true,
+      onExit,
+    });
+
+    pty.read.on('data', (data) => {
+      buffer += data.toString();
+    });
+
+    await vi.waitFor(() => expect(onExit).toHaveBeenCalledTimes(1));
+    expect(onExit).toHaveBeenCalledWith(null, 0);
+    expect(buffer.trim()).toBe('1');
+  });
+
   test('can be resized', async () => {
     const oldFds = getOpenFds();
     let buffer = '';
