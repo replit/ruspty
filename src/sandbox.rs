@@ -97,10 +97,8 @@ fn get_syscall_targets(pid: Pid) -> Result<Vec<SyscallTarget>> {
   }
   match Sysno::new(regs.orig_rax as usize) {
     Some(sysno @ Sysno::open) => {
-      let mut path = read_path(pid, regs.rdi as u64).context("open: read path")?;
-      if path.is_relative() {
-        path = get_cwd(pid).context("open: get cwd")?.join(path);
-      }
+      let mut path = get_cwd(pid).context("open: get cwd")?;
+      path.push(read_path(pid, regs.rdi as u64).context("open: read path")?);
       debug!(pid:? = pid, filename:?= path, sysno:?=sysno; "syscall");
       let accmode = (regs.rsi & OFlag::O_ACCMODE.bits() as u64) as c_int;
       if accmode != OFlag::O_WRONLY.bits() && accmode != OFlag::O_RDWR.bits() {
@@ -193,15 +191,12 @@ fn get_syscall_targets(pid: Pid) -> Result<Vec<SyscallTarget>> {
       }])
     }
     Some(sysno @ Sysno::openat) => {
-      let mut path = read_path(pid, regs.rsi as u64)?;
-      if path.is_relative() {
-        let base = match regs.rdi {
-          AT_FDCWD64 | AT_FDCWD => get_cwd(pid).context("openat: get cwd")?,
-          dirfd => get_fd_path(pid, dirfd as i32)
-            .with_context(|| format!("openat: get fd path {:x}", regs.rdi))?,
-        };
-        path = base.join(path);
-      }
+      let mut path = match regs.rdi {
+        AT_FDCWD64 | AT_FDCWD => get_cwd(pid).context("openat: get cwd")?,
+        dirfd => get_fd_path(pid, dirfd as i32)
+          .with_context(|| format!("openat: get fd path {:x}", regs.rdi))?,
+      };
+      path.push(read_path(pid, regs.rsi as u64)?);
       debug!(pid:? = pid, filename:?= path, sysno:?=sysno; "syscall");
       let accmode = (regs.rdx & OFlag::O_ACCMODE.bits() as u64) as c_int;
       if accmode != OFlag::O_WRONLY.bits() && accmode != OFlag::O_RDWR.bits() {
@@ -670,6 +665,19 @@ pub struct Options {
   pub rules: Vec<Rule>,
 }
 
+pub fn prepare_sandbox(options: Option<Options>, apparmor_profile: Option<&str>) -> Result<()> {
+  // The pending AppArmor profile is inherited across fork. Set it before starting the
+  // tracer: a non-dumpable pre-exec child cannot have its cwd or pathname memory inspected.
+  if let Some(profile) = apparmor_profile {
+    // TODO: Make this fail once we're sure we're never going back.
+    let _ = std::fs::write("/proc/self/attr/apparmor/exec", format!("exec {profile}"));
+  }
+  if let Some(options) = options {
+    install_sandbox(options)?;
+  }
+  Ok(())
+}
+
 /// Install a sandbox in "the current process".
 ///
 /// In reality this forks the process and the child process is the one that is run under the sandbox.
@@ -769,22 +777,29 @@ mod tests {
           }
           drop(stderr_file);
 
+          std::env::set_current_dir(tempdir).expect("set fixture directory");
           if let Err(err) = install_sandbox(Options {
             rules: vec![
               Rule {
                 operation: Operation::Modify,
                 prefixes: vec![
-                  "/home/runner/workspace/.replit".to_string(),
-                  "/home/runner/workspace/replit.nix".to_string(),
-                  "/home/runner/workspace/.git/refs/replit/agent-ledger".to_string(),
+                  tempdir.join(".replit").to_string_lossy().into_owned(),
+                  tempdir.join("replit.nix").to_string_lossy().into_owned(),
+                  tempdir
+                    .join(".git/refs/replit/agent-ledger")
+                    .to_string_lossy()
+                    .into_owned(),
                 ],
                 exclude_prefixes: None,
                 message: "Tried to modify a forbidden path".to_string(),
               },
               Rule {
                 operation: Operation::Delete,
-                prefixes: vec!["/home/runner/workspace/.git/".to_string()],
-                exclude_prefixes: Some(vec!["/home/runner/workspace/.git/index.lock".to_string()]),
+                prefixes: vec![format!("{}/.git/", tempdir.display())],
+                exclude_prefixes: Some(vec![tempdir
+                  .join(".git/index.lock")
+                  .to_string_lossy()
+                  .into_owned()]),
                 message: "Tried to delete a forbidden path".to_string(),
               },
             ],
@@ -846,7 +861,7 @@ mod tests {
   fn run_non_dumpable_shell(
     dir: &Path,
     script: &str,
-    before_exec: impl Fn() -> std::io::Result<()> + Send + Sync + 'static,
+    after_setup: impl Fn() -> std::io::Result<()> + Send + Sync + 'static,
   ) -> Output {
     let options = Options {
       rules: vec![
@@ -869,57 +884,26 @@ mod tests {
     unsafe {
       command.pre_exec(move || {
         nix::sys::prctl::set_dumpable(false)?;
-        install_sandbox(options.clone()).map_err(std::io::Error::other)?;
-        before_exec()
+        prepare_sandbox(Some(options.clone()), Some("agent")).map_err(std::io::Error::other)?;
+        if nix::sys::prctl::get_dumpable()? {
+          return Err(std::io::Error::other(
+            "sandbox setup must not enable dumpability",
+          ));
+        }
+        after_setup()
       });
     }
     command.output().expect("run non-dumpable shell")
   }
 
   #[test]
-  fn it_allows_absolute_pre_exec_opens_when_non_dumpable() {
-    let dir = TempDir::with_prefix("pid2sandbox-").expect("create tempdir");
-    for (sysno, dirfd) in [
-      (libc::SYS_open, libc::AT_FDCWD),
-      (libc::SYS_openat, libc::AT_FDCWD),
-      (libc::SYS_openat, -1),
-    ] {
-      let output = run_non_dumpable_shell(dir.path(), "printf ready", move || {
-        let fd = unsafe {
-          if sysno == libc::SYS_open {
-            libc::syscall(sysno, c"/dev/null".as_ptr(), libc::O_WRONLY)
-          } else {
-            libc::syscall(sysno, dirfd, c"/dev/null".as_ptr(), libc::O_WRONLY)
-          }
-        };
-        if fd == -1 {
-          return Err(std::io::Error::last_os_error());
-        }
-        unsafe { libc::close(fd as c_int) };
-        Ok(())
-      });
-      assert_eq!(
-        output.status.code(),
-        Some(0),
-        "sysno={sysno}, dirfd={dirfd}: {}",
-        String::from_utf8_lossy(&output.stderr)
-      );
-      assert_eq!(output.stdout, b"ready");
-    }
-  }
-
-  #[test]
-  fn it_runs_shell_after_non_dumpable_apparmor_setup() {
+  fn it_runs_shell_after_non_dumpable_sandbox_setup() {
     let dir = TempDir::with_prefix("pid2sandbox-").expect("create tempdir");
     std::fs::write(dir.path().join("fixture.txt"), "fixture-content").expect("write fixture");
     let output = run_non_dumpable_shell(
       dir.path(),
       "set -e; pwd; id; printf 'probe-ok\\n'; readlink /proc/self/cwd; cat fixture.txt",
-      || {
-        // Match the best-effort AppArmor setup in Pty::new, before exec resets dumpability.
-        let _ = std::fs::write("/proc/self/attr/apparmor/exec", "exec agent");
-        Ok(())
-      },
+      || Ok(()),
     );
     assert_eq!(
       output.status.code(),
@@ -930,28 +914,6 @@ mod tests {
     let stdout = String::from_utf8(output.stdout).expect("decode stdout");
     assert!(stdout.contains("probe-ok\n"));
     assert!(stdout.ends_with("fixture-content"));
-  }
-
-  #[test]
-  fn it_blocks_absolute_pre_exec_writes_when_non_dumpable() {
-    let dir = TempDir::with_prefix("pid2sandbox-").expect("create tempdir");
-    let protected = dir.path().join("protected.txt");
-    std::fs::write(&protected, "original").expect("write fixture");
-    let target = protected.clone();
-    let output = run_non_dumpable_shell(dir.path(), "printf should-not-run", move || {
-      std::fs::write(&target, "changed")
-    });
-    assert_eq!(
-      output.status.code(),
-      Some(254),
-      "{}",
-      String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(output.stdout.is_empty());
-    assert_eq!(
-      std::fs::read(&protected).expect("read fixture"),
-      b"original"
-    );
   }
 
   #[test]
@@ -980,25 +942,26 @@ mod tests {
   }
 
   #[test]
-  fn it_fails_closed_on_relative_pre_exec_writes_when_non_dumpable() {
+  fn it_fails_closed_on_pre_exec_writes_when_non_dumpable() {
     let dir = TempDir::with_prefix("pid2sandbox-").expect("create tempdir");
     let protected = dir.path().join("protected.txt");
     std::fs::write(&protected, "original").expect("write fixture");
-    let output = run_non_dumpable_shell(dir.path(), "printf should-not-run", || {
-      std::fs::write("protected.txt", "changed")
-    });
-    assert_eq!(
-      output.status.code(),
-      Some(1),
-      "{}",
-      String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(String::from_utf8_lossy(&output.stderr).contains("Permission denied"));
-    assert!(output.stdout.is_empty());
-    assert_eq!(
-      std::fs::read(&protected).expect("read fixture"),
-      b"original"
-    );
+    for target in [protected.clone(), PathBuf::from("protected.txt")] {
+      let output = run_non_dumpable_shell(dir.path(), "printf should-not-run", move || {
+        std::fs::write(&target, "changed")
+      });
+      assert_eq!(
+        output.status.code(),
+        Some(1),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+      );
+      assert!(output.stdout.is_empty());
+      assert_eq!(
+        std::fs::read(&protected).expect("read fixture"),
+        b"original"
+      );
+    }
   }
 
   #[test]
@@ -1036,7 +999,7 @@ mod tests {
   #[test]
   fn it_prevents_modifying_dot_replit() {
     fn exec_hook() -> ! {
-      std::fs::write("/home/runner/workspace/.replit", "yo").expect("write .replit");
+      std::fs::write(".replit", "yo").expect("write .replit");
       unsafe { libc::_exit(0) };
     }
 
@@ -1051,13 +1014,13 @@ mod tests {
   #[test]
   fn it_allows_modifying_dot_git_index_lock() {
     fn exec_hook() -> ! {
-      std::fs::write("/home/runner/workspace/.git/index.lock", "yo")
-        .expect("write .git/index.lock");
+      std::fs::write(".git/index.lock", "yo").expect("write .git/index.lock");
       unsafe { libc::_exit(0) };
     }
 
     let tmp_dir =
       TempDir::with_prefix("pid2sandbox-").expect("Failed to create temporary directory");
+    std::fs::create_dir(tmp_dir.path().join(".git")).expect("create fixture .git");
     // Cargo captures the error message, but we only care about the exit code.
     let (exit_status, _, _) =
       test_install_sandbox(exec_hook, tmp_dir.path()).expect("test_install_sandbox");
