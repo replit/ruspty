@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::fs::{write, File};
+use std::fs::File;
 use std::io::ErrorKind;
 use std::io::{Error, Write};
 use std::os::fd::{AsRawFd, OwnedFd};
@@ -217,32 +217,28 @@ impl Pty {
               return Err(Error::last_os_error());
             }
           }
-
-          // also set the sandbox if specified. It's important for it to be in a cgroup so that we don't
-          // accidentally leak processes if something went wrong.
-          if let Some(sandbox_opts) = &opts.sandbox {
-            if let Err(err) = sandbox::install_sandbox(sandbox::Options {
-              rules: sandbox_opts
-                .rules
-                .iter()
-                .map(|rule| sandbox::Rule {
-                  operation: match rule.operation {
-                    Operation::Modify => sandbox::Operation::Modify,
-                    Operation::Delete => sandbox::Operation::Delete,
-                  },
-                  prefixes: rule.prefixes.clone(),
-                  exclude_prefixes: rule.exclude_prefixes.clone(),
-                  message: rule.message.clone(),
-                })
-                .collect(),
-            }) {
-              return Err(Error::new(
-                ErrorKind::Other,
-                format!("install_sandbox: {:#?}", err),
-              ));
-            }
-          }
         }
+
+        #[cfg(target_os = "linux")]
+        sandbox::prepare_sandbox(
+          opts.sandbox.as_ref().map(|sandbox_opts| sandbox::Options {
+            rules: sandbox_opts
+              .rules
+              .iter()
+              .map(|rule| sandbox::Rule {
+                operation: match rule.operation {
+                  Operation::Modify => sandbox::Operation::Modify,
+                  Operation::Delete => sandbox::Operation::Delete,
+                },
+                prefixes: rule.prefixes.clone(),
+                exclude_prefixes: rule.exclude_prefixes.clone(),
+                message: rule.message.clone(),
+              })
+              .collect(),
+          }),
+          opts.apparmor_profile.as_deref(),
+        )
+        .map_err(|err| Error::new(ErrorKind::Other, format!("prepare_sandbox: {err:#?}")))?;
 
         // start a new session
         let err = libc::setsid();
@@ -271,16 +267,6 @@ impl Pty {
           libc::c_uint::MAX,
           libc::CLOSE_RANGE_CLOEXEC as c_int,
         );
-
-        // Set the AppArmor profile.
-        #[cfg(target_os = "linux")]
-        if let Some(apparmor_profile) = &opts.apparmor_profile {
-          // TODO: Make this fail once we're sure we're never going back.
-          let _ = write(
-            "/proc/self/attr/apparmor/exec",
-            format!("exec {apparmor_profile}"),
-          );
-        }
 
         // set input modes
         let user_fd = OwnedFd::from_raw_fd(raw_user_fd);

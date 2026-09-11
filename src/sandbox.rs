@@ -665,6 +665,19 @@ pub struct Options {
   pub rules: Vec<Rule>,
 }
 
+pub fn prepare_sandbox(options: Option<Options>, apparmor_profile: Option<&str>) -> Result<()> {
+  // The pending AppArmor profile is inherited across fork. Set it before starting the
+  // tracer: a non-dumpable pre-exec child cannot have its cwd or pathname memory inspected.
+  if let Some(profile) = apparmor_profile {
+    // TODO: Make this fail once we're sure we're never going back.
+    let _ = std::fs::write("/proc/self/attr/apparmor/exec", format!("exec {profile}"));
+  }
+  if let Some(options) = options {
+    install_sandbox(options)?;
+  }
+  Ok(())
+}
+
 /// Install a sandbox in "the current process".
 ///
 /// In reality this forks the process and the child process is the one that is run under the sandbox.
@@ -737,7 +750,7 @@ mod tests {
   use std::os::fd::AsRawFd;
   use std::os::unix::process::CommandExt;
   use std::path::Path;
-  use std::process::Command;
+  use std::process::{Command, Output};
 
   use nix::sys::wait::waitpid;
   use nix::unistd::{dup2, getppid};
@@ -764,22 +777,29 @@ mod tests {
           }
           drop(stderr_file);
 
+          std::env::set_current_dir(tempdir).expect("set fixture directory");
           if let Err(err) = install_sandbox(Options {
             rules: vec![
               Rule {
                 operation: Operation::Modify,
                 prefixes: vec![
-                  "/home/runner/workspace/.replit".to_string(),
-                  "/home/runner/workspace/replit.nix".to_string(),
-                  "/home/runner/workspace/.git/refs/replit/agent-ledger".to_string(),
+                  tempdir.join(".replit").to_string_lossy().into_owned(),
+                  tempdir.join("replit.nix").to_string_lossy().into_owned(),
+                  tempdir
+                    .join(".git/refs/replit/agent-ledger")
+                    .to_string_lossy()
+                    .into_owned(),
                 ],
                 exclude_prefixes: None,
                 message: "Tried to modify a forbidden path".to_string(),
               },
               Rule {
                 operation: Operation::Delete,
-                prefixes: vec!["/home/runner/workspace/.git/".to_string()],
-                exclude_prefixes: Some(vec!["/home/runner/workspace/.git/index.lock".to_string()]),
+                prefixes: vec![format!("{}/.git/", tempdir.display())],
+                exclude_prefixes: Some(vec![tempdir
+                  .join(".git/index.lock")
+                  .to_string_lossy()
+                  .into_owned()]),
                 message: "Tried to delete a forbidden path".to_string(),
               },
             ],
@@ -838,6 +858,112 @@ mod tests {
     );
   }
 
+  fn run_non_dumpable_shell(
+    dir: &Path,
+    script: &str,
+    after_setup: impl Fn() -> std::io::Result<()> + Send + Sync + 'static,
+  ) -> Output {
+    let options = Options {
+      rules: vec![
+        Rule {
+          operation: Operation::Modify,
+          prefixes: vec![dir.to_string_lossy().into_owned()],
+          exclude_prefixes: None,
+          message: "Workspace is read-only".to_string(),
+        },
+        Rule {
+          operation: Operation::Delete,
+          prefixes: vec![dir.to_string_lossy().into_owned()],
+          exclude_prefixes: None,
+          message: "Workspace is read-only".to_string(),
+        },
+      ],
+    };
+    let mut command = Command::new("bash");
+    command.current_dir(dir).args(["-c", script]);
+    unsafe {
+      command.pre_exec(move || {
+        nix::sys::prctl::set_dumpable(false)?;
+        prepare_sandbox(Some(options.clone()), Some("agent")).map_err(std::io::Error::other)?;
+        if nix::sys::prctl::get_dumpable()? {
+          return Err(std::io::Error::other(
+            "sandbox setup must not enable dumpability",
+          ));
+        }
+        after_setup()
+      });
+    }
+    command.output().expect("run non-dumpable shell")
+  }
+
+  #[test]
+  fn it_runs_shell_after_non_dumpable_sandbox_setup() {
+    let dir = TempDir::with_prefix("pid2sandbox-").expect("create tempdir");
+    std::fs::write(dir.path().join("fixture.txt"), "fixture-content").expect("write fixture");
+    let output = run_non_dumpable_shell(
+      dir.path(),
+      "set -e; pwd; id; printf 'probe-ok\\n'; readlink /proc/self/cwd; cat fixture.txt",
+      || Ok(()),
+    );
+    assert_eq!(
+      output.status.code(),
+      Some(0),
+      "{}",
+      String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("decode stdout");
+    assert!(stdout.contains("probe-ok\n"));
+    assert!(stdout.ends_with("fixture-content"));
+  }
+
+  #[test]
+  fn it_blocks_workspace_mutations_after_non_dumpable_startup() {
+    let dir = TempDir::with_prefix("pid2sandbox-").expect("create tempdir");
+    let protected = dir.path().join("protected.txt");
+    std::fs::write(&protected, "original").expect("write fixture");
+    for script in [
+      "printf changed > protected.txt",
+      "printf changed > \"$PWD/protected.txt\"",
+      "rm protected.txt",
+      "rm \"$PWD/protected.txt\"",
+    ] {
+      let output = run_non_dumpable_shell(dir.path(), script, || Ok(()));
+      assert_eq!(
+        output.status.code(),
+        Some(254),
+        "{script}: {}",
+        String::from_utf8_lossy(&output.stderr)
+      );
+      assert_eq!(
+        std::fs::read(&protected).expect("read fixture"),
+        b"original"
+      );
+    }
+  }
+
+  #[test]
+  fn it_fails_closed_on_pre_exec_writes_when_non_dumpable() {
+    let dir = TempDir::with_prefix("pid2sandbox-").expect("create tempdir");
+    let protected = dir.path().join("protected.txt");
+    std::fs::write(&protected, "original").expect("write fixture");
+    for target in [protected.clone(), PathBuf::from("protected.txt")] {
+      let output = run_non_dumpable_shell(dir.path(), "printf should-not-run", move || {
+        std::fs::write(&target, "changed")
+      });
+      assert_eq!(
+        output.status.code(),
+        Some(1),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+      );
+      assert!(output.stdout.is_empty());
+      assert_eq!(
+        std::fs::read(&protected).expect("read fixture"),
+        b"original"
+      );
+    }
+  }
+
   #[test]
   fn it_doesnt_leak_fds() {
     fn exec_hook() -> ! {
@@ -873,7 +999,7 @@ mod tests {
   #[test]
   fn it_prevents_modifying_dot_replit() {
     fn exec_hook() -> ! {
-      std::fs::write("/home/runner/workspace/.replit", "yo").expect("write .replit");
+      std::fs::write(".replit", "yo").expect("write .replit");
       unsafe { libc::_exit(0) };
     }
 
@@ -888,13 +1014,13 @@ mod tests {
   #[test]
   fn it_allows_modifying_dot_git_index_lock() {
     fn exec_hook() -> ! {
-      std::fs::write("/home/runner/workspace/.git/index.lock", "yo")
-        .expect("write .git/index.lock");
+      std::fs::write(".git/index.lock", "yo").expect("write .git/index.lock");
       unsafe { libc::_exit(0) };
     }
 
     let tmp_dir =
       TempDir::with_prefix("pid2sandbox-").expect("Failed to create temporary directory");
+    std::fs::create_dir(tmp_dir.path().join(".git")).expect("create fixture .git");
     // Cargo captures the error message, but we only care about the exit code.
     let (exit_status, _, _) =
       test_install_sandbox(exec_hook, tmp_dir.path()).expect("test_install_sandbox");
