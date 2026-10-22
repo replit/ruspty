@@ -36,6 +36,13 @@ export interface PtyOptions {
   newCgroupNamespace?: boolean;
   apparmorProfile?: string;
   interactive?: boolean;
+  /**
+   * Connect the child's stdout and stderr to one pipe instead of the PTY. The child gets no
+   * controlling terminal and its stdin is `/dev/null`, so it sees non-terminal output and
+   * cannot open `/dev/tty`. The controller fd then reads the combined stdout and stderr
+   * stream. Cannot be combined with `interactive: true`.
+   */
+  pipeOutput?: boolean;
   sandbox?: SandboxOptions;
   onExit: (err: null | Error, exitCode: number) => void;
 }

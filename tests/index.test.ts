@@ -917,6 +917,106 @@ describe('sandbox opts', { repeats: 10 }, async () => {
   });
 });
 
+describe('pipeOutput', { repeats: 50 }, () => {
+  async function run(
+    script: string,
+    opts: { onData?: (pty: Pty) => void } = {},
+  ) {
+    let buffer = '';
+    const onExit = vi.fn();
+    const pty = new Pty({
+      command: 'bash',
+      args: ['-c', script],
+      envs: { PATH: process.env.PATH ?? '/usr/bin:/bin' },
+      interactive: false,
+      pipeOutput: true,
+      onExit,
+    });
+    pty.read.on('data', (data) => {
+      buffer += data.toString();
+    });
+    opts.onData?.(pty);
+    await vi.waitFor(() => expect(onExit).toHaveBeenCalledTimes(1));
+    return { pty, onExit, output: () => buffer };
+  }
+
+  test('gives the child non-terminal stdout and stderr', async () => {
+    const oldFds = getOpenFds();
+    const { onExit, output } = await run(
+      '[ -t 1 ] && echo out-tty || echo out-pipe; [ -t 2 ] && echo err-tty >&2 || echo err-pipe >&2',
+    );
+
+    expect(onExit).toHaveBeenCalledWith(null, 0);
+    // no PTY line discipline, so newlines are not translated to CRLF
+    expect(output()).toStrictEqual('out-pipe\nerr-pipe\n');
+    await vi.waitFor(() => expect(getOpenFds()).toStrictEqual(oldFds));
+  });
+
+  testSkipOnDarwin('gives the child no controlling terminal', async () => {
+    const { onExit, output } = await run(
+      '[ -t 0 ] && echo in-tty || echo in-not-tty; (exec 3</dev/tty) 2>/dev/null && echo has-tty || echo no-tty',
+    );
+
+    expect(onExit).toHaveBeenCalledWith(null, 0);
+    expect(output()).toStrictEqual('in-not-tty\nno-tty\n');
+  });
+
+  test('captures an exit code', async () => {
+    const oldFds = getOpenFds();
+    const { onExit } = await run('exit 17');
+
+    expect(onExit).toHaveBeenCalledWith(null, 17);
+    await vi.waitFor(() => expect(getOpenFds()).toStrictEqual(oldFds));
+  });
+
+  test('keeps stdout and stderr in write order', async () => {
+    const { output } = await run(
+      'for i in $(seq 1 200); do echo "out $i"; echo "err $i" >&2; done',
+    );
+
+    const expected: Array<string> = [];
+    for (let i = 1; i <= 200; i++) {
+      expected.push(`out ${i}`, `err ${i}`);
+    }
+    expect(output().trim().split('\n')).toStrictEqual(expected);
+  });
+
+  test('doesnt miss large output from fast commands', async () => {
+    const size = 5 * 65536;
+    const { onExit, output } = await run(
+      `head -c ${size} /dev/zero | tr '\\0' x`,
+    );
+
+    expect(onExit).toHaveBeenCalledWith(null, 0);
+    expect(output()).toStrictEqual('x'.repeat(size));
+  });
+
+  test('is read-only, and resize and close do not throw', async () => {
+    const oldFds = getOpenFds();
+    const { pty } = await run('echo done', {
+      onData: (pty) => {
+        expect(pty.write.writable).toBe(false);
+        expect(() => pty.resize({ rows: 30, cols: 100 })).not.toThrow();
+      },
+    });
+
+    expect(() => pty.close()).not.toThrow();
+    await vi.waitFor(() => expect(getOpenFds()).toStrictEqual(oldFds));
+  });
+
+  test('cannot be combined with interactive', () => {
+    expect(
+      () =>
+        new Pty({
+          command: 'true',
+          interactive: true,
+          pipeOutput: true,
+          onExit: () => {},
+        }),
+    ).toThrow(/pipe_output with interactive/);
+  });
+});
+
 describe('setCloseOnExec', () => {
   test('setCloseOnExec', () => {
     // stdio typically never has the close-on-exec flag since it's always expected to be

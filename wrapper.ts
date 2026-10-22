@@ -1,3 +1,4 @@
+import { Socket } from 'node:net';
 import { type Readable, type Writable } from 'node:stream';
 import { ReadStream } from 'node:tty';
 import {
@@ -58,7 +59,7 @@ export class Pty {
   #userFdDropped: boolean = false;
   #fdDropTimeout: ReturnType<typeof setTimeout> | null = null;
 
-  #socket: ReadStream;
+  #socket: Socket;
   read: Readable;
   write: Writable;
 
@@ -92,7 +93,11 @@ export class Pty {
       },
     });
     this.#fd = this.#pty.takeControllerFd();
-    this.#socket = new ReadStream(this.#fd);
+    // with pipeOutput the controller fd is the read end of a pipe, not a tty. It is read-only and
+    // reaches a plain EOF instead of EIO once every writer is gone.
+    this.#socket = options.pipeOutput
+      ? new Socket({ fd: this.#fd, readable: true, writable: false })
+      : new ReadStream(this.#fd);
 
     // catch end events
     const handleClose = async () => {

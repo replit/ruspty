@@ -17,6 +17,7 @@ use nix::fcntl::{fcntl, FcntlArg, FdFlag, OFlag};
 use nix::libc::{self, c_int, TIOCSCTTY, TIOCSWINSZ};
 use nix::pty::{openpty, Winsize};
 use nix::sys::termios::{self, SetArg};
+use nix::unistd::pipe;
 
 #[macro_use]
 extern crate napi_derive;
@@ -71,6 +72,11 @@ struct PtyOptions {
   pub new_cgroup_namespace: Option<bool>,
   pub apparmor_profile: Option<String>,
   pub interactive: Option<bool>,
+  /// Connect the child's stdout and stderr to one pipe instead of the PTY. The child gets no
+  /// controlling terminal and its stdin is `/dev/null`, so it sees non-terminal output and
+  /// cannot open `/dev/tty`. The controller fd then reads the combined stdout and stderr
+  /// stream. Cannot be combined with `interactive: true`.
+  pub pipe_output: Option<bool>,
   pub sandbox: Option<SandboxOptions>,
   #[napi(ts_type = "(err: null | Error, exitCode: number) => void")]
   pub on_exit: JsFunction,
@@ -152,6 +158,14 @@ impl Pty {
       ));
     }
 
+    let pipe_output = opts.pipe_output.unwrap_or(false);
+    if pipe_output && opts.interactive == Some(true) {
+      return Err(napi::Error::new(
+        napi::Status::GenericFailure,
+        "cannot enable pipe_output with interactive",
+      ));
+    }
+
     let size = opts.size.unwrap_or(Size { cols: 80, rows: 24 });
     let window_size = Winsize {
       ws_col: size.cols,
@@ -165,18 +179,23 @@ impl Pty {
       cmd.args(args);
     }
 
-    // open pty pair, and set close-on-exec to avoid unwanted copies of the FDs from finding their
-    // way into subprocesses. Also set the nonblocking flag to avoid Node from consuming a full I/O
-    // thread for this.
-    let pty_res = openpty(&window_size, None).map_err(cast_to_napi_error)?;
-    let controller_fd = pty_res.master;
-    let user_fd = pty_res.slave;
+    // open pty pair (or a pipe with pipe_output), and set close-on-exec to avoid unwanted copies
+    // of the FDs from finding their way into subprocesses. Also set the nonblocking flag to avoid
+    // Node from consuming a full I/O thread for this.
+    // With pipe_output the read end takes the controller's place and the write end the user's, so
+    // the synthetic EOF and fd-drop lifecycle below work the same way for both.
+    let (controller_fd, user_fd) = if pipe_output {
+      pipe().map_err(cast_to_napi_error)?
+    } else {
+      let pty_res = openpty(&window_size, None).map_err(cast_to_napi_error)?;
+      (pty_res.master, pty_res.slave)
+    };
     set_close_on_exec(controller_fd.as_raw_fd(), true)?;
     set_close_on_exec(user_fd.as_raw_fd(), true)?;
     set_nonblocking(controller_fd.as_raw_fd())?;
 
-    // duplicate pty user_fd to be the child's stdin, stdout, and stderr
-    if opts.interactive.unwrap_or(true) {
+    // duplicate user_fd to be the child's stdout and stderr, and stdin when interactive
+    if !pipe_output && opts.interactive.unwrap_or(true) {
       cmd.stdin(Stdio::from(user_fd.try_clone()?));
     } else {
       cmd.stdin(Stdio::null());
@@ -246,12 +265,15 @@ impl Pty {
           return Err(Error::new(ErrorKind::Other, "setsid"));
         }
 
-        // become the controlling tty for the program.
+        // become the controlling tty for the program. With pipe_output there is no tty, so the
+        // program stays without a controlling terminal.
         // Note that TIOCSCTTY is not the same size in all platforms.
-        #[allow(clippy::useless_conversion)]
-        let err = libc::ioctl(raw_user_fd, TIOCSCTTY.into(), 0);
-        if err == -1 {
-          return Err(Error::new(ErrorKind::Other, "ioctl-TIOCSCTTY"));
+        if !pipe_output {
+          #[allow(clippy::useless_conversion)]
+          let err = libc::ioctl(raw_user_fd, TIOCSCTTY.into(), 0);
+          if err == -1 {
+            return Err(Error::new(ErrorKind::Other, "ioctl-TIOCSCTTY"));
+          }
         }
 
         // we need to drop the controller fd, since we don't need it in the child
