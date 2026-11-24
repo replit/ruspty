@@ -13,6 +13,9 @@ use std::panic::catch_unwind;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
+
+pub use crate::edit_snapshot::CaptureOptions;
+use crate::edit_snapshot::EditCapture;
 use log::{debug, error};
 use nix::fcntl::OFlag;
 use nix::libc::{self, c_int};
@@ -362,8 +365,12 @@ impl std::error::Error for SandboxError {
 }
 
 /// Inspect the tracee's syscall that is about to be executed.
-fn handle_syscall(pid: Pid, options: &Options) -> Result<()> {
-  for target in get_syscall_targets(pid).context("get_target_path")? {
+fn handle_syscall(pid: Pid, options: &Options, capture: &mut Option<EditCapture>) -> Result<()> {
+  let targets = get_syscall_targets(pid).context("get_target_path")?;
+  if let Some(capture) = capture {
+    observe_edit(pid, &targets, capture);
+  }
+  for target in targets {
     let path_str = match target.path.as_path().to_str() {
       Some(path_str) => path_str,
       None => {
@@ -409,6 +416,34 @@ fn handle_syscall(pid: Pid, options: &Options) -> Result<()> {
   Ok(())
 }
 
+fn observe_edit(pid: Pid, targets: &[SyscallTarget], capture: &mut EditCapture) {
+  let Ok(regs) = ptrace::getregs(pid) else {
+    return;
+  };
+  if regs.rax != (-(Error::ENOSYS as i32)) as u64 {
+    capture.exit(pid, regs.rax as i64);
+    return;
+  }
+  let written: Vec<PathBuf> = targets.iter().map(|target| target.path.clone()).collect();
+  let rename = match targets {
+    [source, destination]
+      if matches!(
+        source.sysno,
+        Sysno::rename | Sysno::renameat | Sysno::renameat2
+      ) =>
+    {
+      let flags = if source.sysno == Sysno::renameat2 {
+        regs.r8
+      } else {
+        0
+      };
+      Some((source.path.as_path(), destination.path.as_path(), flags))
+    }
+    _ => None,
+  };
+  capture.entry(pid, &written, rename);
+}
+
 extern "C" fn forward_signal(signum: c_int) {
   debug!(signum; "received signal");
   if let Ok(signal) = Signal::try_from(signum) {
@@ -418,7 +453,7 @@ extern "C" fn forward_signal(signum: c_int) {
 }
 
 /// Run the tracee under the sandbox.
-fn run_parent(main_pid: Pid, options: &Options) -> Result<i32> {
+fn run_parent(main_pid: Pid, options: &Options, capture: &mut Option<EditCapture>) -> Result<i32> {
   set_name(CStr::from_bytes_with_nul(b"sandbox\0").context("create process name")?)
     .context("set process name")?;
   unsafe {
@@ -503,7 +538,7 @@ fn run_parent(main_pid: Pid, options: &Options) -> Result<i32> {
       Ok(WaitStatus::Stopped(pid, sig_num)) => match sig_num {
         signum @ Signal::SIGTRAP => {
           debug!(signal:?=signum, pid:? = pid; "signal");
-          match handle_syscall(pid, options)
+          match handle_syscall(pid, options, capture)
             .with_context(|| format!("handle_sigtrap pid={pid}, signum={signum}"))
           {
             Ok(()) => match ptrace::syscall(pid, None) {
@@ -563,7 +598,9 @@ fn run_parent(main_pid: Pid, options: &Options) -> Result<i32> {
       },
 
       Ok(WaitStatus::PtraceSyscall(pid)) => {
-        match handle_syscall(pid, options).with_context(|| format!("handle_syscall pid={pid}")) {
+        match handle_syscall(pid, options, capture)
+          .with_context(|| format!("handle_syscall pid={pid}"))
+        {
           Ok(()) => match ptrace::syscall(pid, None) {
             Ok(_) => {}
             Err(Error::ESRCH) => {}
@@ -663,6 +700,7 @@ pub struct Rule {
 #[derive(Clone)]
 pub struct Options {
   pub rules: Vec<Rule>,
+  pub capture: Option<CaptureOptions>,
 }
 
 pub fn prepare_sandbox(options: Option<Options>, apparmor_profile: Option<&str>) -> Result<()> {
@@ -715,8 +753,14 @@ pub fn install_sandbox(options: Options) -> Result<()> {
 
     ForkResult::Parent { child } => {
       let err = catch_unwind(|| {
-        let status_code = match run_parent(child, &options).context("run_parent") {
-          Ok(result) => result,
+        let mut capture = options.capture.clone().map(EditCapture::new);
+        let status_code = match run_parent(child, &options, &mut capture).context("run_parent") {
+          Ok(result) => {
+            if let Some(capture) = capture {
+              capture.finish(result);
+            }
+            result
+          }
           Err(err) => match err.downcast_ref::<SandboxError>() {
             Some(err) => {
               eprintln!("{}", err);
@@ -803,6 +847,7 @@ mod tests {
                 message: "Tried to delete a forbidden path".to_string(),
               },
             ],
+            capture: None,
           }) {
             eprintln!("failed to fork sandbox: {err}");
             unsafe { libc::_exit(4) };
@@ -878,6 +923,7 @@ mod tests {
           message: "Workspace is read-only".to_string(),
         },
       ],
+      capture: None,
     };
     let mut command = Command::new("bash");
     command.current_dir(dir).args(["-c", script]);
@@ -894,6 +940,83 @@ mod tests {
       });
     }
     command.output().expect("run non-dumpable shell")
+  }
+
+  fn run_capturing_shell(dir: &Path, script: &str) -> Option<String> {
+    let output_path = dir.join("..").join(format!(
+      "{}-edit.json",
+      dir.file_name().unwrap().to_string_lossy()
+    ));
+    let _ = std::fs::remove_file(&output_path);
+    let options = Options {
+      rules: vec![],
+      capture: Some(CaptureOptions {
+        root: dir.to_path_buf(),
+        output: output_path.clone(),
+      }),
+    };
+    let mut command = Command::new("bash");
+    command.current_dir(dir).args(["-c", script]);
+    unsafe {
+      command.pre_exec(move || {
+        prepare_sandbox(Some(options.clone()), None).map_err(std::io::Error::other)
+      });
+    }
+    command.output().expect("run capturing shell");
+    let edit = std::fs::read_to_string(&output_path).ok();
+    let _ = std::fs::remove_file(&output_path);
+    edit
+  }
+
+  #[test]
+  fn it_captures_one_verified_sed_edit() {
+    let dir = TempDir::with_prefix("rename-capture-").expect("create tempdir");
+    let button = dir.path().join("button.txt");
+    std::fs::write(&button, "<button>Save</button>\n").expect("write fixture");
+    let edit = run_capturing_shell(dir.path(), "sed -i 's/Save/Save changes/' button.txt")
+      .expect("verified edit");
+    assert_eq!(
+      edit,
+      format!(
+        "{{\"path\":\"{}\",\"before\":\"<button>Save</button>\\u000a\",\"after\":\"<button>Save changes</button>\\u000a\"}}",
+        button.display()
+      )
+    );
+  }
+
+  #[test]
+  fn it_reports_nothing_for_unattributable_commands() {
+    let dir = TempDir::with_prefix("rename-capture-").expect("create tempdir");
+    for script in [
+      "cat button.txt",
+      "sed -i 's/Save/Save changes/' button.txt; false",
+      "sed -i 's/Save/Save changes/' button.txt; printf other > other.txt",
+      "sed -i 's/Save/Save changes/' button.txt; printf mine >> button.txt",
+      "sed -i 's/Save/Save changes/' button.txt; sed -i 's/changes/edits/' button.txt",
+      "printf 'Save changes' > button.txt",
+    ] {
+      std::fs::write(dir.path().join("button.txt"), "Save\n").expect("write fixture");
+      assert_eq!(run_capturing_shell(dir.path(), script), None, "{script}");
+    }
+  }
+
+  #[test]
+  fn it_reports_nothing_when_another_writer_replaces_the_file() {
+    let dir = TempDir::with_prefix("rename-capture-").expect("create tempdir");
+    let button = dir.path().join("button.txt");
+    std::fs::write(&button, "Save\n").expect("write fixture");
+    let path = dir.path().to_path_buf();
+    let writer = std::thread::spawn(move || {
+      std::thread::sleep(std::time::Duration::from_millis(300));
+      std::fs::write(path.join("other"), "Save changes\n").unwrap();
+      std::fs::rename(path.join("other"), path.join("button.txt")).unwrap();
+    });
+    let edit = run_capturing_shell(
+      dir.path(),
+      "sed -i 's/Save/Save changes/' button.txt; sleep 0.6",
+    );
+    writer.join().unwrap();
+    assert_eq!(edit, None);
   }
 
   #[test]

@@ -23,6 +23,8 @@ use nix::unistd::pipe;
 extern crate napi_derive;
 
 #[cfg(target_os = "linux")]
+mod edit_snapshot;
+#[cfg(target_os = "linux")]
 mod sandbox;
 
 #[napi]
@@ -58,6 +60,15 @@ pub struct SandboxRule {
 #[napi(object)]
 pub struct SandboxOptions {
   pub rules: Vec<SandboxRule>,
+  /// Report one verified rename-based edit of a small text file under `root` by writing
+  /// `{path, before, after}` JSON to `output_path` when the command succeeds.
+  pub verified_edit: Option<VerifiedEditOptions>,
+}
+
+#[napi(object)]
+pub struct VerifiedEditOptions {
+  pub root: String,
+  pub output_path: String,
 }
 
 /// The options that can be passed to the constructor of Pty.
@@ -254,6 +265,13 @@ impl Pty {
                 message: rule.message.clone(),
               })
               .collect(),
+            capture: sandbox_opts
+              .verified_edit
+              .as_ref()
+              .map(|edit| sandbox::CaptureOptions {
+                root: edit.root.clone().into(),
+                output: edit.output_path.clone().into(),
+              }),
           }),
           opts.apparmor_profile.as_deref(),
         )

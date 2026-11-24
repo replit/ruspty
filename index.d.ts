@@ -22,7 +22,12 @@ export interface SandboxRule {
   message: string;
 }
 /** Options for the sandbox. */
+export interface VerifiedEditOptions {
+  root: string;
+  outputPath: string;
+}
 export interface SandboxOptions {
+  verifiedEdit?: VerifiedEditOptions;
   rules: Array<SandboxRule>;
 }
 /** The options that can be passed to the constructor of Pty. */
