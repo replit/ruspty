@@ -432,6 +432,19 @@ fn observe_edit(pid: Pid, targets: &[SyscallTarget], capture: &mut EditCapture) 
     capture.exit(pid, regs.rax as i64);
     return;
   }
+  if let [target] = targets {
+    let flags = match target.sysno {
+      Sysno::open => Some(regs.rsi),
+      Sysno::openat => Some(regs.rdx),
+      _ => None,
+    };
+    if target.path == std::path::Path::new("/dev/tty")
+      && flags == Some((OFlag::O_RDWR | OFlag::O_NONBLOCK).bits() as u64)
+    {
+      capture.terminal_open(pid);
+      return;
+    }
+  }
   let written: Vec<PathBuf> = targets.iter().map(|target| target.path.clone()).collect();
   let rename = match targets {
     [source, destination]
@@ -970,6 +983,10 @@ mod tests {
   }
 
   fn run_capturing_shell(dir: &Path, script: &str) -> Option<String> {
+    run_capturing_shell_in_root(dir, dir, script)
+  }
+
+  fn run_capturing_shell_in_root(dir: &Path, root: &Path, script: &str) -> Option<String> {
     use std::os::unix::net::UnixDatagram;
     let (rx, tx) = UnixDatagram::pair().unwrap();
     rx.set_nonblocking(true).unwrap();
@@ -977,7 +994,7 @@ mod tests {
       rules: vec![],
       observe_only: true,
       capture: Some(CaptureOptions {
-        root: dir.into(),
+        root: root.into(),
         output: tx.as_raw_fd(),
       }),
     };
@@ -1008,6 +1025,23 @@ mod tests {
         button.display()
       )
     );
+  }
+
+  #[test]
+  fn terminal_open_is_not_a_second_edit_in_a_filesystem_root_workspace() {
+    let dir = TempDir::new().unwrap();
+    let write = || std::fs::write(dir.path().join("example.txt"), "before\n").unwrap();
+    let edit = "sed -i 's/before/after/' example.txt && grep -Fx after example.txt";
+    write();
+    let record = run_capturing_shell_in_root(dir.path(), Path::new("/"), edit).unwrap();
+    assert!(record.contains(r#""after":"after\u000a""#));
+    write();
+    assert!(run_capturing_shell_in_root(
+      dir.path(),
+      Path::new("/"),
+      &format!("{edit} && echo extra > second.txt")
+    )
+    .is_none());
   }
 
   #[test]

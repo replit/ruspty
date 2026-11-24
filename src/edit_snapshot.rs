@@ -1,9 +1,9 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
-use std::fs::{File, Metadata, OpenOptions};
+use std::fs::{File, Metadata};
 use std::io::Read;
 use std::os::fd::AsRawFd;
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+use std::os::unix::fs::{FileTypeExt, MetadataExt, OpenOptionsExt};
 use std::path::{Component, Path, PathBuf};
 
 use nix::unistd::Pid;
@@ -25,7 +25,7 @@ impl Snapshot {
     let path = Path::new("/proc/self/fd")
       .join(directory.as_raw_fd().to_string())
       .join(name);
-    let file = OpenOptions::new()
+    let file = File::options()
       .read(true)
       .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
       .open(path)
@@ -94,6 +94,7 @@ struct Rename {
 pub(crate) struct EditCapture {
   options: CaptureOptions,
   pending: HashMap<Pid, Rename>,
+  terminal_opens: HashSet<Pid>,
   edits: Vec<Rename>,
   touched: Vec<PathBuf>,
   tainted: bool,
@@ -104,10 +105,15 @@ impl EditCapture {
     Self {
       options,
       pending: HashMap::new(),
+      terminal_opens: HashSet::new(),
       edits: Vec::new(),
       touched: Vec::new(),
       tainted: false,
     }
+  }
+
+  pub(crate) fn terminal_open(&mut self, pid: Pid) {
+    self.terminal_opens.insert(pid);
   }
 
   pub(crate) fn invalidate(&mut self) {
@@ -170,6 +176,16 @@ impl EditCapture {
 
   /// Called at syscall exit with the syscall's return value.
   pub(crate) fn exit(&mut self, pid: Pid, result: i64) {
+    if self.terminal_opens.remove(&pid) && result >= 0 {
+      // Bash opens /dev/tty for job control. With a filesystem-root workspace,
+      // verify the returned descriptor is the controlling-terminal device before
+      // discounting that open. A filename alone is not evidence.
+      if !std::fs::metadata(format!("/proc/{pid}/fd/{result}"))
+        .is_ok_and(|m| m.file_type().is_char_device() && m.rdev() == libc::makedev(5, 0))
+      {
+        self.invalidate();
+      }
+    }
     if let Some(rename) = self.pending.remove(&pid) {
       if result == 0 {
         self.edits.push(rename);
@@ -182,7 +198,11 @@ impl EditCapture {
   /// Writes the edit when exactly one verified replacement explains every
   /// workspace mutation of a successful command.
   pub(crate) fn finish(self, exit_status: i32) {
-    if exit_status != 0 || self.tainted || !self.pending.is_empty() {
+    if exit_status != 0
+      || self.tainted
+      || !self.pending.is_empty()
+      || !self.terminal_opens.is_empty()
+    {
       return;
     }
     let [edit] = self.edits.as_slice() else {
