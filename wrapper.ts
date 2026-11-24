@@ -63,6 +63,10 @@ export class Pty {
   read: Readable;
   write: Writable;
 
+  takeVerifiedEdit(): string | null {
+    return this.#pty.takeVerifiedEdit() ?? null;
+  }
+
   constructor(options: PtyOptions) {
     const realExit = options.onExit;
 

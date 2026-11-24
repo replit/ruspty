@@ -366,7 +366,14 @@ impl std::error::Error for SandboxError {
 
 /// Inspect the tracee's syscall that is about to be executed.
 fn handle_syscall(pid: Pid, options: &Options, capture: &mut Option<EditCapture>) -> Result<()> {
-  let targets = get_syscall_targets(pid).context("get_target_path")?;
+  let targets = match get_syscall_targets(pid) {
+    Ok(targets) => targets,
+    Err(_) if options.observe_only => {
+      *capture = None;
+      return Ok(());
+    }
+    Err(err) => return Err(err).context("get_target_path"),
+  };
   if let Some(capture) = capture {
     observe_edit(pid, &targets, capture);
   }
@@ -418,6 +425,7 @@ fn handle_syscall(pid: Pid, options: &Options, capture: &mut Option<EditCapture>
 
 fn observe_edit(pid: Pid, targets: &[SyscallTarget], capture: &mut EditCapture) {
   let Ok(regs) = ptrace::getregs(pid) else {
+    capture.invalidate();
     return;
   };
   if regs.rax != (-(Error::ENOSYS as i32)) as u64 {
@@ -479,12 +487,18 @@ fn run_parent(main_pid: Pid, options: &Options, capture: &mut Option<EditCapture
       }
     }
 
-    // Close all open file descriptors, except stderr.
+    // Only stderr and the optional capture socket belong to the tracer.
     let close_range_flags: c_int = 0;
     libc::syscall(libc::SYS_close_range, 0, 1, close_range_flags);
+    let keep = options.capture.as_ref().map(|c| c.output as u32);
+    if let Some(fd) = keep {
+      if fd > 3 {
+        libc::syscall(libc::SYS_close_range, 3u32, fd - 1, close_range_flags);
+      }
+    }
     libc::syscall(
       libc::SYS_close_range,
-      3,
+      keep.map_or(3, |fd| fd + 1),
       libc::c_uint::MAX,
       close_range_flags,
     );
@@ -701,6 +715,7 @@ pub struct Rule {
 pub struct Options {
   pub rules: Vec<Rule>,
   pub capture: Option<CaptureOptions>,
+  pub observe_only: bool,
 }
 
 pub fn prepare_sandbox(options: Option<Options>, apparmor_profile: Option<&str>) -> Result<()> {
@@ -745,7 +760,17 @@ pub fn install_sandbox(options: Options) -> Result<()> {
 
   match unsafe { fork() }.context("fork")? {
     ForkResult::Child => {
-      ptrace::traceme().context("ptrace::traceme")?;
+      if let Some(c) = &options.capture {
+        unsafe {
+          libc::close(c.output);
+        }
+      }
+      if let Err(err) = ptrace::traceme() {
+        if options.observe_only {
+          return Ok(());
+        }
+        return Err(err).context("ptrace::traceme");
+      }
       raise(Signal::SIGSTOP).context("raise SIGSTOP")?;
 
       Ok(())
@@ -848,6 +873,7 @@ mod tests {
               },
             ],
             capture: None,
+            observe_only: false,
           }) {
             eprintln!("failed to fork sandbox: {err}");
             unsafe { libc::_exit(4) };
@@ -924,6 +950,7 @@ mod tests {
         },
       ],
       capture: None,
+      observe_only: false,
     };
     let mut command = Command::new("bash");
     command.current_dir(dir).args(["-c", script]);
@@ -943,16 +970,15 @@ mod tests {
   }
 
   fn run_capturing_shell(dir: &Path, script: &str) -> Option<String> {
-    let output_path = dir.join("..").join(format!(
-      "{}-edit.json",
-      dir.file_name().unwrap().to_string_lossy()
-    ));
-    let _ = std::fs::remove_file(&output_path);
+    use std::os::unix::net::UnixDatagram;
+    let (rx, tx) = UnixDatagram::pair().unwrap();
+    rx.set_nonblocking(true).unwrap();
     let options = Options {
       rules: vec![],
+      observe_only: true,
       capture: Some(CaptureOptions {
-        root: dir.to_path_buf(),
-        output: output_path.clone(),
+        root: dir.into(),
+        output: tx.as_raw_fd(),
       }),
     };
     let mut command = Command::new("bash");
@@ -963,9 +989,9 @@ mod tests {
       });
     }
     command.output().expect("run capturing shell");
-    let edit = std::fs::read_to_string(&output_path).ok();
-    let _ = std::fs::remove_file(&output_path);
-    edit
+    let mut bytes = [0; 4096];
+    let n = rx.recv(&mut bytes).ok()?;
+    String::from_utf8(bytes[..n].to_vec()).ok()
   }
 
   #[test]
@@ -973,7 +999,7 @@ mod tests {
     let dir = TempDir::with_prefix("rename-capture-").expect("create tempdir");
     let button = dir.path().join("button.txt");
     std::fs::write(&button, "<button>Save</button>\n").expect("write fixture");
-    let edit = run_capturing_shell(dir.path(), "sed -i 's/Save/Save changes/' button.txt")
+    let edit = run_capturing_shell(dir.path(), "sed -i 's/Save/Save changes/' button.txt && grep -Fx '<button>Save changes</button>' button.txt")
       .expect("verified edit");
     assert_eq!(
       edit,

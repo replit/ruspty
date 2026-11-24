@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::fs::{File, Metadata, OpenOptions};
-use std::io::{Read, Write};
+use std::io::Read;
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Component, Path, PathBuf};
@@ -54,7 +54,13 @@ impl Snapshot {
   }
 
   fn read_path(path: &Path) -> Option<Self> {
-    let directory = File::open(path.parent()?).ok()?;
+    let parent = path.parent()?;
+    let directory = File::open(parent).ok()?;
+    let held_parent =
+      std::fs::read_link(format!("/proc/self/fd/{}", directory.as_raw_fd())).ok()?;
+    if held_parent != parent {
+      return None;
+    }
     Self::read(&directory, path.file_name()?)
   }
 
@@ -72,7 +78,7 @@ impl Snapshot {
 #[derive(Clone)]
 pub struct CaptureOptions {
   pub root: PathBuf,
-  pub output: PathBuf,
+  pub output: std::os::fd::RawFd,
 }
 
 struct Rename {
@@ -104,6 +110,10 @@ impl EditCapture {
     }
   }
 
+  pub(crate) fn invalidate(&mut self) {
+    self.tainted = true;
+  }
+
   fn in_root(&self, path: &Path) -> bool {
     path.starts_with(&self.options.root) && !path.components().any(|c| c == Component::ParentDir)
   }
@@ -121,13 +131,23 @@ impl EditCapture {
     }
     for path in written {
       if path.starts_with(&self.options.root) {
-        self.touched.push(path.clone());
+        if !self.touched.contains(path) {
+          if self.touched.len() == 2 {
+            self.tainted = true;
+            return;
+          }
+          self.touched.push(path.clone());
+        }
       }
     }
     let Some((source_path, destination_path, flags)) = rename else {
       return;
     };
     if !self.in_root(destination_path) && !self.in_root(source_path) {
+      return;
+    }
+    if !self.edits.is_empty() || !self.pending.is_empty() {
+      self.tainted = true;
       return;
     }
     let rename = (flags == 0 && self.in_root(source_path) && self.in_root(destination_path))
@@ -190,14 +210,14 @@ impl EditCapture {
       json_string(&edit.before.bytes),
       json_string(&after.bytes)
     );
-    if let Ok(mut file) = OpenOptions::new()
-      .write(true)
-      .create_new(true)
-      .mode(0o600)
-      .open(&self.options.output)
-    {
-      let _ = file.write_all(json.as_bytes());
-    }
+    unsafe {
+      libc::send(
+        self.options.output,
+        json.as_ptr().cast(),
+        json.len(),
+        libc::MSG_DONTWAIT | libc::MSG_NOSIGNAL,
+      )
+    };
   }
 }
 

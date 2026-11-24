@@ -34,6 +34,7 @@ struct Pty {
   user_fd: Option<OwnedFd>,
   /// The pid of the forked process.
   pub pid: u32,
+  edit_receiver: Option<std::os::unix::net::UnixDatagram>,
 }
 
 #[napi(string_enum)]
@@ -60,15 +61,6 @@ pub struct SandboxRule {
 #[napi(object)]
 pub struct SandboxOptions {
   pub rules: Vec<SandboxRule>,
-  /// Report one verified rename-based edit of a small text file under `root` by writing
-  /// `{path, before, after}` JSON to `output_path` when the command succeeds.
-  pub verified_edit: Option<VerifiedEditOptions>,
-}
-
-#[napi(object)]
-pub struct VerifiedEditOptions {
-  pub root: String,
-  pub output_path: String,
 }
 
 /// The options that can be passed to the constructor of Pty.
@@ -89,6 +81,7 @@ struct PtyOptions {
   /// stream. Cannot be combined with `interactive: true`.
   pub pipe_output: Option<bool>,
   pub sandbox: Option<SandboxOptions>,
+  pub verified_edit_root: Option<String>,
   #[napi(ts_type = "(err: null | Error, exitCode: number) => void")]
   pub on_exit: JsFunction,
 }
@@ -225,6 +218,19 @@ impl Pty {
       cmd.current_dir(dir);
     }
 
+    let (edit_receiver, edit_sender) =
+      if cfg!(target_os = "linux") && opts.verified_edit_root.is_some() {
+        std::os::unix::net::UnixDatagram::pair()
+          .ok()
+          .and_then(|(rx, tx)| {
+            rx.set_nonblocking(true).ok()?;
+            tx.set_nonblocking(true).ok()?;
+            Some((Some(rx), Some(tx)))
+          })
+          .unwrap_or((None, None))
+      } else {
+        (None, None)
+      };
     let raw_user_fd = user_fd.as_raw_fd();
     let raw_controller_fd = controller_fd.as_raw_fd();
     unsafe {
@@ -251,10 +257,12 @@ impl Pty {
 
         #[cfg(target_os = "linux")]
         sandbox::prepare_sandbox(
-          opts.sandbox.as_ref().map(|sandbox_opts| sandbox::Options {
-            rules: sandbox_opts
-              .rules
+          (opts.sandbox.is_some() || edit_sender.is_some()).then(|| sandbox::Options {
+            observe_only: opts.sandbox.is_none(),
+            rules: opts
+              .sandbox
               .iter()
+              .flat_map(|s| &s.rules)
               .map(|rule| sandbox::Rule {
                 operation: match rule.operation {
                   Operation::Modify => sandbox::Operation::Modify,
@@ -265,12 +273,13 @@ impl Pty {
                 message: rule.message.clone(),
               })
               .collect(),
-            capture: sandbox_opts
-              .verified_edit
+            capture: opts
+              .verified_edit_root
               .as_ref()
-              .map(|edit| sandbox::CaptureOptions {
-                root: edit.root.clone().into(),
-                output: edit.output_path.clone().into(),
+              .zip(edit_sender.as_ref())
+              .map(|(root, tx)| sandbox::CaptureOptions {
+                root: root.into(),
+                output: tx.as_raw_fd(),
               }),
           }),
           opts.apparmor_profile.as_deref(),
@@ -386,7 +395,18 @@ impl Pty {
       controller_fd: Some(controller_fd),
       user_fd: Some(user_fd),
       pid,
+      edit_receiver,
     })
+  }
+
+  #[napi]
+  pub fn take_verified_edit(&mut self) -> Option<String> {
+    let socket = self.edit_receiver.take()?;
+    // Two 16 KiB strings may expand sixfold when escaped as JSON.
+    let mut bytes = vec![0; 208 * 1024];
+    let n = socket.recv(&mut bytes).ok()?;
+    bytes.truncate(n);
+    String::from_utf8(bytes).ok()
   }
 
   /// Transfers ownership of the file descriptor for the PTY controller. This can only be called
