@@ -1054,6 +1054,7 @@ mod tests {
       "sed -i 's/Save/Save changes/' button.txt; printf mine >> button.txt",
       "sed -i 's/Save/Save changes/' button.txt; sed -i 's/changes/edits/' button.txt",
       "printf 'Save changes' > button.txt",
+      "printf mine >> button.txt; sed -i 's/Save/Save changes/' button.txt",
     ] {
       std::fs::write(dir.path().join("button.txt"), "Save\n").expect("write fixture");
       assert_eq!(run_capturing_shell(dir.path(), script), None, "{script}");

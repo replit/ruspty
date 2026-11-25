@@ -97,6 +97,7 @@ pub(crate) struct EditCapture {
   terminal_opens: HashSet<Pid>,
   edits: Vec<Rename>,
   touched: Vec<PathBuf>,
+  written_in_place: Vec<PathBuf>,
   tainted: bool,
 }
 
@@ -108,6 +109,7 @@ impl EditCapture {
       terminal_opens: HashSet::new(),
       edits: Vec::new(),
       touched: Vec::new(),
+      written_in_place: Vec::new(),
       tainted: false,
     }
   }
@@ -147,6 +149,7 @@ impl EditCapture {
       }
     }
     let Some((source_path, destination_path, flags)) = rename else {
+      self.written_in_place.extend_from_slice(written);
       return;
     };
     if !self.in_root(destination_path) && !self.in_root(source_path) {
@@ -208,10 +211,13 @@ impl EditCapture {
     let [edit] = self.edits.as_slice() else {
       return;
     };
+    // `before` is read at rename time, so an earlier write to the
+    // destination would already be in it and missing from the diff.
     if !self
       .touched
       .iter()
       .all(|path| *path == edit.source_path || *path == edit.destination_path)
+      || self.written_in_place.contains(&edit.destination_path)
     {
       return;
     }
